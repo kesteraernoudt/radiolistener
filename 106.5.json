@@ -1,0 +1,24 @@
+{
+    "NAME": "Mix106.5",
+    "PHRASES": [
+        {
+            "mode": "regex",
+            "text": "text (now|immediately)"
+        },
+        {
+            "mode": "contains",
+            "text": "disney"
+        },
+        {
+            "mode": "contains",
+            "text": "code word"
+        },
+        {
+            "mode": "contains",
+            "text": "great America"
+        }
+    ],
+    "SMS_NUMBER": "+1408-516-1065",
+    "SMS_NUMBER_OLD": "408-538-5229",
+    "STREAM_URL": "https://live.amperwave.net/direct/alphacorporate-kezrfmmp3-ibc4"
+}

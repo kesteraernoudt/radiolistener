@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>Audio Monitor</title>
+  <style>
+    body {
+      font-family: Arial;
+      margin: 20px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 200px;
+      font-family: monospace;
+    }
+
+    .logbox {
+      width: 100%;
+      height: 250px;
+      overflow-y: scroll;
+      border: 1px solid #ccc;
+      background: #000;
+      color: #0f0;
+      padding: 5px;
+      white-space: pre-wrap;
+    }
+
+    .section {
+      margin-bottom: 30px;
+    }
+
+    button {
+      margin-top: 5px;
+    }
+
+    audio {
+      display: block;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Audio Monitor</h1>
+
+  <div class="section">
+    <h2>Live Stream</h2>
+    <audio controls>
+      <source src="{{ radio_conf['STREAM_URL'] }}" type="audio/mpeg">
+      Your browser does not support the audio element.
+    </audio>
+  </div>
+
+  <div class="section">
+    <h2>Live Logs</h2>
+    <div id="logbox" class="logbox">{{ logs }}</div>
+  </div>
+
+  <div class="section">
+    <h2>Config</h2>
+    <textarea id="config">{{ config | tojson(indent=2) }}</textarea><br>
+    <button onclick="saveConfig()">Save Config</button>
+  </div>
+
+  <div class="section">
+    <h2>Radio Config (Advanced)</h2>
+    <textarea id="radio_conf">{{ radio_conf | tojson(indent=2) }}</textarea><br>
+    <button onclick="saveRadioConf()">Save Radio Config</button>
+  </div>
+
+  <div class="section">
+    <h2>Phrases</h2>
+    <div id="phrases-list"></div>
+    <button onclick="addPhrase()">Add Phrase</button>
+    <br><br>
+    <button onclick="savePhrases()">Save Phrases</button>
+  </div>
+
+  <div class="section">
+    <h2>Manual Clip</h2>
+    <button onclick="saveClip()">Save Clip</button>
+  </div>
+
+  <script>
+    async function saveClip() {
+      try {
+        let res = await fetch('/save_clip', { method: 'POST' });
+        let data = await res.json();
+        alert(data.message || "Clip saved!");
+      } catch (e) {
+        alert("Error saving clip");
+      }
+    }
+
+
+    async function reloadLogs() {
+      let res = await fetch('/logs/live');
+      let data = await res.json();
+      document.getElementById("logbox").innerText = data.logs.join("\n");
+      document.getElementById("logbox").scrollTop = document.getElementById("logbox").scrollHeight;
+      setTimeout(reloadLogs, 2000);
+    }
+
+    async function saveConfig() {
+      try {
+        let cfg = JSON.parse(document.getElementById("config").value);
+        await fetch('/update_config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cfg)
+        });
+        alert("Config saved!");
+      } catch (e) {
+        alert("Invalid JSON");
+      }
+    }
+
+    const MATCH_OPTIONS = ["contains", "regex", "exact"];
+
+    function renderPhrases(phrases) {
+      const list = document.getElementById("phrases-list");
+      list.innerHTML = "";
+      phrases.forEach((ph, idx) => {
+        const div = document.createElement("div");
+        div.style.marginBottom = "5px";
+        div.innerHTML = `
+      <input type="text" value="${ph.text}" style="width:60%" onchange="updatePhraseText(${idx}, this.value)">
+      <select onchange="updatePhraseMatch(${idx}, this.value)">
+        ${MATCH_OPTIONS.map(opt => `<option value="${opt}"${ph.mode === opt ? " selected" : ""}>${opt}</option>`).join("")}
+      </select>
+      <button onclick="deletePhrase(${idx})">Delete</button>
+    `;
+        list.appendChild(div);
+      });
+    }
+
+    let radio_conf = {{ radio_conf | tojson }};
+    let phrases = radio_conf.PHRASES || [];
+
+    function updatePhraseText(idx, val) {
+      phrases[idx].text = val;
+      radio_conf.PHRASES = phrases;
+      document.getElementById("radio_conf").value = JSON.stringify(radio_conf, null, 2);
+    }
+    function updatePhraseMatch(idx, val) {
+      phrases[idx].mode = val;
+      radio_conf.PHRASES = phrases;
+      document.getElementById("radio_conf").value = JSON.stringify(radio_conf, null, 2);
+    }
+    function deletePhrase(idx) {
+      phrases.splice(idx, 1);
+      radio_conf.PHRASES = phrases;
+      renderPhrases(phrases);
+      document.getElementById("radio_conf").value = JSON.stringify(radio_conf, null, 2);
+    }
+    function addPhrase() {
+      phrases.push({ text: "", mode: "contains" });
+      radio_conf.PHRASES = phrases;
+      renderPhrases(phrases);
+      document.getElementById("radio_conf").value = JSON.stringify(radio_conf, null, 2);
+    }
+    async function savePhrases() {
+      try {
+        radio_conf.PHRASES = phrases;
+        await fetch('/update_radio_conf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(radio_conf)
+        });
+        alert("Phrases saved!");
+      } catch (e) {
+        alert("Error saving phrases");
+      }
+    }
+    async function saveRadioConf() {
+      try {
+        radio_conf = JSON.parse(document.getElementById("radio_conf").value);
+        phrases = radio_conf.PHRASES || [];
+        renderPhrases(phrases);
+        await fetch('/update_radio_conf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(radio_conf)
+        });
+        alert("Radio config saved!");
+      } catch (e) {
+        alert("Invalid JSON");
+      }
+    }
+    window.onload = function () {
+      reloadLogs();
+      renderPhrases(phrases);
+      document.getElementById("radio_conf").value = JSON.stringify(radio_conf, null, 2);
+    }
+  </script>
+</body>
+
+</html>
