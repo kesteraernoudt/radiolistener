@@ -12,10 +12,18 @@ class RadioListener():
     def __init__(self, config_path):
         super().__init__()
         self.config_path = config_path
-        self.controller = None
+        self.controllers = {}  # key: station name, value: RadioController instance
         self.flask_thread = None
         self.CONFIG = None
         self.telegramBot = None
+
+    def controller(self, radio_name=""):
+        if not radio_name:
+            # return the first controller for now
+            return next(iter(self.controllers.values()), None)
+        if radio_name in self.controllers:
+            return self.controllers[radio_name]
+        return None
 
     def start(self):
         with open(self.config_path) as f:
@@ -25,15 +33,22 @@ class RadioListener():
         self.CONFIG["TELEGRAM_CHAT_ID"] = os.getenv("TELEGRAM_CHAT_ID")
         self.CONFIG["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
         self.telegramBot = TelegramBot(listener.CONFIG["TELEGRAM_BOT_TOKEN"], self)
-        # for now only one controller
-        self.controller = RadioController(self.CONFIG, "106.5.json", self)
-        self.controller.start()
+        for radio_conf_path in self.CONFIG["RADIO_CONFIGS"]:
+            with open(radio_conf_path) as rf:
+                radio_conf = json.load(rf)
+                name = radio_conf["NAME"]
+                self.controllers[name] = RadioController(self.CONFIG, radio_conf_path, self)
+                self.controllers[name].start()
+        #self.controller = RadioController(self.CONFIG, "106.5.json", self)
+        #self.controller.start()
         self.flask_thread = threading.Thread(target=self._start_flask, daemon=True)
         self.flask_thread.start()
         self.telegramBot.bot_main()
 
     def get_recent_texts(self, num_lines=10, radio=""):
-        # for now ignore radio and just return texts from current radio
+        controller = self.controller(radio)
+        if controller is None or controller.processor is None:
+            return ""
         return "\n".join(self.controller.processor.previous_texts[-num_lines:])
     
     def _start_flask(self):

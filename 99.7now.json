@@ -1,0 +1,23 @@
+{
+    "NAME": "99.7now",
+    "PHRASES": [
+        {
+            "mode": "regex",
+            "text": "call (now|immediately)"
+        },
+        {
+            "mode": "contains",
+            "text": "disney"
+        },
+        {
+            "mode": "contains",
+            "text": "code word"
+        },
+        {
+            "mode": "contains",
+            "text": "great America"
+        }
+    ],
+    "SMS_NUMBER": "+1888-456-9970",
+    "STREAM_URL": "https://bonneville.cdnstream1.com/2622_48.aac"
+}

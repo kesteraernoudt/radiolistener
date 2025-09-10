@@ -47,15 +47,16 @@ class StreamProcessor:
 
     def send_alert(self, matches, code_word):
         now = time.time()
-        alert_msg = (
-            f"🚨 {self.radio_conf['NAME']} alert: '{matches}' was just said - "
-            f"text {self.radio_conf['SMS_NUMBER']}: {code_word}"
-        )
-        logger.log_event(alert_msg)
-        print(alert_msg)
+        alert_msg = f"🚨 '{matches}' heard - codeword is {code_word}"
+        if "SMS_NUMBER" in self.radio_conf:
+            alert_msg += f": text to {self.radio_conf['SMS_NUMBER']}"
+        if "CALL_NUMBER" in self.radio_conf:
+            alert_msg += f": call {self.radio_conf['CALL_NUMBER']}"
+        logger.log_event(self.radio_conf['NAME'], alert_msg)
+        print(self.radio_conf['NAME'] + ": " + alert_msg)
         if now - self.last_alert_time > 300:  # MIN_ALERT_INTERVAL
             #telegram_notifier.send_telegram(alert_msg)
-            self.controller.send_message(alert_msg)
+            self.controller.send_message(self.radio_conf['NAME'] + ": " + alert_msg)
             self.last_alert_time = now
             self.do_save_full_clip = 1
 
@@ -88,7 +89,7 @@ class StreamProcessor:
                         if code_word:
                             self.send_alert(matches, code_word)
                         else:
-                            logger.log_event(f"No code word found for match: {matches}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
+                            logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {matches}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
                     if self.do_save_full_clip:
                         last_clip_path = clip_saver.save_clip(self.rolling_buffer)
                         #telegram_notifier.send_telegram_audio(last_clip_path, caption="")
@@ -98,7 +99,7 @@ class StreamProcessor:
                         #)
                         #self.controller.send_message("context:\n" + "\n".join(self.previous_texts[-self.CONTEXT_LEN:]) + "\n" + text)
                         self.do_save_full_clip = 0
-                    logger.log_event(f"{self.radio_conf['NAME']}: {text}")
+                    logger.log_event(self.radio_conf['NAME'], text)
                     matches = self.phrase_matches(text, self.radio_conf["PHRASES"])
                     if matches:
                         # check with genai if there is a code word
@@ -106,7 +107,7 @@ class StreamProcessor:
                         if code_word:
                             self.send_alert(matches, code_word)
                         else:
-                            logger.log_event(f"No code word found for match: {matches}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
+                            logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {matches}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
                             last_match = matches # try again when next match is there
                     self.previous_texts.append(text)
                     if len(self.previous_texts) > self.MAX_MSG_STORAGE:

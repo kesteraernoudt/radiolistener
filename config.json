@@ -4,5 +4,10 @@
   "CLIP_DURATION": 20,
   "KEEP_DAYS": 7,
   "MIN_ALERT_INTERVAL": 300,
-  "WHISPER_MODEL": "base"
+  "WHISPER_MODEL": "base",
+  "RADIO_CONFIGS": [
+    "106.5.json",
+    "alice.json",
+    "99.7now.json"
+  ]
 }

@@ -1,5 +1,5 @@
 {
-  "NAME": "Mix106.5",
+  "NAME": "Alice",
   "PHRASES": [
     {
       "mode": "regex",
@@ -18,7 +18,6 @@
       "text": "great America"
     }
   ],
-  "SMS_NUMBER": "+1408-516-1065",
-  "SMS_NUMBER_OLD": "408-538-5229",
-  "STREAM_URL": "https://live.amperwave.net/direct/alphacorporate-kezrfmmp3-ibc4"
+  "SMS_NUMBER": "20357",
+  "STREAM_URL": "https://live.amperwave.net/direct/audacy-kllcfmaac-imc"
 }
