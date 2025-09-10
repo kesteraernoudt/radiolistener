@@ -45,7 +45,7 @@ class StreamProcessor:
                 return t
         return str()
 
-    def send_alert(self, matches, code_word):
+    def send_alert(self, matches, code_word, context=""):
         now = time.time()
         alert_msg = f"🚨 '{matches}' heard - codeword is {code_word}"
         if "SMS_NUMBER" in self.radio_conf:
@@ -56,7 +56,7 @@ class StreamProcessor:
         print(self.radio_conf['NAME'] + ": " + alert_msg)
         if now - self.last_alert_time > 300:  # MIN_ALERT_INTERVAL
             #telegram_notifier.send_telegram(alert_msg)
-            self.controller.send_message(self.radio_conf['NAME'] + ": " + alert_msg)
+            self.controller.send_message(self.radio_conf['NAME'] + ": " + alert_msg + (f", context: {context}" if context else ""))
             self.last_alert_time = now
             self.do_save_full_clip = 1
 
@@ -85,9 +85,10 @@ class StreamProcessor:
                 if text:
                     if last_match:
                         last_match = ""  # reset last match after using it
-                        code_word = self.genAIHandler.generate(f"{self.previous_texts[-1] if self.previous_texts else ''} {text}")
+                        context = f"{self.previous_texts[-1] if self.previous_texts else ''} {text}"
+                        code_word = self.genAIHandler.generate(context)
                         if code_word:
-                            self.send_alert(matches, code_word)
+                            self.send_alert(matches, code_word, context)
                         else:
                             logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {matches}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
                     if self.do_save_full_clip:
@@ -103,9 +104,10 @@ class StreamProcessor:
                     matches = self.phrase_matches(text, self.radio_conf["PHRASES"])
                     if matches:
                         # check with genai if there is a code word
-                        code_word = self.genAIHandler.generate(f"{self.previous_texts[-1] if self.previous_texts else ''} {text}")
+                        context = f"{self.previous_texts[-1] if self.previous_texts else ''} {text}"
+                        code_word = self.genAIHandler.generate(context)
                         if code_word:
-                            self.send_alert(matches, code_word)
+                            self.send_alert(matches, code_word, context)
                         else:
                             logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {matches}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
                             last_match = matches # try again when next match is there

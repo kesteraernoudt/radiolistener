@@ -2,18 +2,22 @@ import google.genai as genai
 
 class GenAIHandler:
     MODEL = "gemini-2.5-flash"
-    PRE_PROMPT = "The following is a transcript from a radio show where there might be a code word that needs to be texted. If you find that word, return just that codeword (usually one word, but might be more). If you don't find such code word, return an empty string. Here is the transcript: "
+    PRE_PROMPT = "The following is a transcript from a radio show where there might be a code word that needs to be texted. If you find that word, return just that codeword (usually one word, but might be more). If you don't find such code word, return an empty string. Don't give any reasoning either. Here is the transcript: "
 
     def __init__(self, api_key: str):
         self.client = genai.Client(api_key=api_key)
 
     def generate(self, prompt: str, max_output_tokens: int = 1024) -> str:
-        response = self.client.models.generate_content(
-            model=self.MODEL,
-            contents=self.PRE_PROMPT + prompt
-        )
-        return response.text
-
+        try:
+            response = self.client.models.generate_content(
+                model=self.MODEL,
+                contents=self.PRE_PROMPT + prompt
+            )
+            return response.text
+        except Exception as e:
+            print(f"GenAIHandler generate error: {e}")
+            return ""
+        
 if __name__ == "__main__":
     genai_handler = GenAIHandler(api_key="MY_API_KEY")
     test_prompt = "Detects that to us right now. You couldn't win a family four pack to six flags great America. Grizzly 408 516 1065 We got all Navy get 50 percent"
