@@ -14,6 +14,7 @@ class StreamProcessor:
                  sample_rate: int = 16000, 
                  CLIP_DURATION: float = 10.0,
                  GENAI_API_KEY: str = "",
+                 pre_prompt_file: str = "",
                  controller=None):
         self.radio_conf = radio_conf
         self.whisper_model = whisper.load_model(asr_whisper_model)
@@ -21,7 +22,7 @@ class StreamProcessor:
         self.buffer_overlap = buffer_overlap
         self.sample_rate = sample_rate
         self.CLIP_DURATION = CLIP_DURATION
-        self.genAIHandler = genai.GenAIHandler(GENAI_API_KEY)
+        self.genAIHandler = genai.GenAIHandler(GENAI_API_KEY, pre_prompt_file)
         self.controller = controller
 
         self.rolling_buffer = b""
@@ -57,6 +58,7 @@ class StreamProcessor:
         if now - self.last_alert_time > 300:  # MIN_ALERT_INTERVAL
             #telegram_notifier.send_telegram(alert_msg)
             self.controller.send_message(self.radio_conf['NAME'] + ": " + alert_msg + (f", context: {context}" if context else ""))
+            #self.controller.send_sms_message(code_word)
             self.last_alert_time = now
             self.do_save_full_clip = 1
 

@@ -1,5 +1,6 @@
 import asyncio
-from telegram.ext import Application, CommandHandler
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from utils import logger
 
 class TelegramBot():
@@ -14,10 +15,11 @@ class TelegramBot():
         self.app = Application.builder().token(self.token).build()
         self.loop = asyncio.get_event_loop()
         self.app.add_handler(CommandHandler('start', self.start_command))
-        self.app.add_handler(CommandHandler('log', self.log_command))
-        self.app.add_handler(CommandHandler('text', self.text_command))
-        self.app.add_handler(CommandHandler('ai', self.ai_command))
-        self.app.add_handler(CommandHandler('radios', self.radios_command))
+        self.app.add_handler(CommandHandler(['log','l'], self.log_command))
+        self.app.add_handler(CommandHandler(['text','t'], self.text_command))
+        self.app.add_handler(CommandHandler(['ai','a'], self.ai_command))
+        self.app.add_handler(CommandHandler(['radios','radio','r'], self.radios_command))
+        self.app.add_handler(CallbackQueryHandler(self.button))
         
         self.app.run_polling()
 
@@ -90,7 +92,21 @@ class TelegramBot():
     def send_sms_message(self, phone_number, text = ""):
         if not text:
             text = "codeword"
-        text.replace(" ", "%20")
-        msg = f"[send sms](sms:{phone_number}&body={text})"
+        text = text.replace(" ", "%20")
+        sms_url = f"sms:{phone_number}&body={text}"
+        keyboard = [ [InlineKeyboardButton(f"SMS {text} to {phone_number}", callback_data=sms_url)] ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
         #msg=f"sms:{phone_number}?body={text}"
-        asyncio.run_coroutine_threadsafe(self.app.bot.send_message(chat_id=self.radioListener.CONFIG["TELEGRAM_CHAT_ID"], text=msg, parse_mode='MarkdownV2'), self.loop)
+        asyncio.run_coroutine_threadsafe(self.app.bot.send_message(chat_id=self.radioListener.CONFIG["TELEGRAM_CHAT_ID"], text="Send SMS?", reply_markup=reply_markup), self.loop)
+
+    @staticmethod
+    async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Parses the CallbackQuery and updates the message text."""
+        query = update.callback_query
+
+        # CallbackQueries need to be answered, even if no notification to the user is needed
+        # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
+        await query.answer()
+        
+        await query.edit_message_text(text=f"{query.data}")

@@ -10,8 +10,16 @@ transcript_log = defaultdict(list)
 def log_event(radio, msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts} - {radio}] {msg}"
-    transcript_log[radio].append(line)
+    transcript_log[radio.upper()].append(line)
     logfile = os.path.join(LOG_DIR, f"{datetime.now().date()}.log")
+    with open(logfile, "a") as f:
+        f.write(line + "\n")
+    return line
+
+def log_ai_event(msg):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}"
+    logfile = os.path.join(LOG_DIR, f"{datetime.now().date()}_ai.log")
     with open(logfile, "a") as f:
         f.write(line + "\n")
     return line
@@ -25,7 +33,14 @@ def cleanup_logs(days=7):
             if mtime < cutoff:
                 os.remove(path)
 
-def get_radio_log(radio, num_lines=100):
-    if radio in transcript_log:
-        return transcript_log[radio][-num_lines:]
+def get_radio_log(radio="", num_lines=100):
+    if not radio:
+        # return combined log
+        combined = []
+        for lines in transcript_log.values():
+            combined.extend(lines)
+        combined = sorted(combined, reverse=True)[:num_lines]
+        return combined
+    if radio.upper() in transcript_log:
+        return transcript_log[radio.upper()][-num_lines:]
     return []

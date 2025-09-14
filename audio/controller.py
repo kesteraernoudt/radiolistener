@@ -66,6 +66,7 @@ class RadioController:
             16000,
             self.CONFIG["CLIP_DURATION"],
             self.CONFIG["GEMINI_API_KEY"],
+            self.CONFIG["AI_PRE_PROMPT_FILE"],
             self
         )
         self.processor.process_audio(self.audio_queue)

@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 from flask import Flask
 import threading
 import json
@@ -21,8 +23,12 @@ class RadioListener():
         if not radio_name:
             # return the first controller for now
             return next(iter(self.controllers.values()), None)
-        if radio_name in self.controllers:
-            return self.controllers[radio_name]
+        if radio_name.upper() in self.controllers:
+            return self.controllers[radio_name.upper()]
+        # see if it's the beginning of a radio name
+        for name, ctrl in self.controllers.items():
+            if name.startswith(radio_name.upper()):
+                return ctrl
         return None
 
     def start(self):
@@ -36,7 +42,7 @@ class RadioListener():
         for radio_conf_path in self.CONFIG["RADIO_CONFIGS"]:
             with open(radio_conf_path) as rf:
                 radio_conf = json.load(rf)
-                name = radio_conf["NAME"]
+                name = radio_conf["NAME"].upper()
                 self.controllers[name] = RadioController(self.CONFIG, radio_conf_path, self)
                 self.controllers[name].start()
         #self.controller = RadioController(self.CONFIG, "106.5.json", self)

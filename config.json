@@ -9,5 +9,6 @@
     "106.5.json",
     "alice.json",
     "99.7now.json"
-  ]
+  ],
+  "AI_PRE_PROMPT_FILE": "pre_prompt.txt"
 }

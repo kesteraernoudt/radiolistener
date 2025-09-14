@@ -1,13 +1,32 @@
 import google.genai as genai
+from utils import logger
+import os
 
 class GenAIHandler:
     MODEL = "gemini-2.5-flash"
-    PRE_PROMPT = "The following is a transcript from a radio show where there might be a code word that needs to be texted. If you find that word, return just that codeword (usually one word, but might be more). If you don't find such code word, return an empty string. Don't give any reasoning either. Here is the transcript: "
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, pre_prompt_file: str = ""):
         self.client = genai.Client(api_key=api_key)
+        self.pre_prompt_file = pre_prompt_file
+        self._pre_prompt_mtime = None
+        self.PRE_PROMPT = ""
+        self._load_pre_prompt()
+
+    def _load_pre_prompt(self):
+        if self.pre_prompt_file and os.path.exists(self.pre_prompt_file):
+            self._pre_prompt_mtime = os.path.getmtime(self.pre_prompt_file)
+            with open(self.pre_prompt_file, "r") as file:
+                self.PRE_PROMPT = file.read()
+
+    def _check_pre_prompt_update(self):
+        if self.pre_prompt_file and os.path.exists(self.pre_prompt_file):
+            mtime = os.path.getmtime(self.pre_prompt_file)
+            if mtime != self._pre_prompt_mtime:
+                self._load_pre_prompt()
 
     def generate(self, prompt: str, max_output_tokens: int = 1024) -> str:
+        self._check_pre_prompt_update()
+        logger.log_ai_event(self.PRE_PROMPT + prompt)
         try:
             response = self.client.models.generate_content(
                 model=self.MODEL,

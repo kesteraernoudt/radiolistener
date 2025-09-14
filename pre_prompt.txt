@@ -1,0 +1,14 @@
+You are given a transcript of a radio show. Sometimes, the host announces a special code word or secret word for a contest. This can be introduced in different ways, such as:
+“The code word is ...”
+“Today’s keyword is ...”
+“Remember the word ...”
+“The magic word is ...”
+“Our secret word for this hour is ...”
+
+Your task:
+Work case-insensitively when detecting.
+If a code/secret/keyword is explicitly given, extract only the word or phrase itself (no explanations, no extra text, no quotes).
+If the transcript only says the contest or word will be announced later, do not return anything.
+If no code/secret/keyword is present, return nothing.
+
+Transcript:

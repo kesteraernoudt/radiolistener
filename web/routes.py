@@ -42,6 +42,7 @@ def update_radio_conf(name):
     ctrl.restart()
     return jsonify(success=True)
 
+@app.route("/radio/logs", defaults={'name': ""})
 @app.route("/radio/<name>/logs")
 def radio_logs(name):
     logs = logger.get_radio_log(name, 200)
