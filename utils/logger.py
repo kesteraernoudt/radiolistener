@@ -43,4 +43,8 @@ def get_radio_log(radio="", num_lines=100):
         return combined
     if radio.upper() in transcript_log:
         return transcript_log[radio.upper()][-num_lines:]
+    # see if it's the beginning of a radio name
+    for name, log in transcript_log.items():
+        if name.startswith(radio.upper()):
+            return log[-num_lines:]
     return []

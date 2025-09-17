@@ -35,6 +35,7 @@ class GenAIHandler:
             return response.text
         except Exception as e:
             print(f"GenAIHandler generate error: {e}")
+            logger.log_ai_event(f"GenAIHandler generate error: {e}")
             return ""
         
 if __name__ == "__main__":
