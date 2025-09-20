@@ -11,3 +11,6 @@ def capture_stream(q, stream_url, controller):
         if not data:
             break
         q.put(data)
+    proc.terminate()
+    proc.wait()
+    

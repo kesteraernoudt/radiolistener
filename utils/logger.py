@@ -5,12 +5,16 @@ from collections import defaultdict
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
+MAX_TRANSCRIPT_LINES = 1000
+
 transcript_log = defaultdict(list)
 
 def log_event(radio, msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts} - {radio}] {msg}"
     transcript_log[radio.upper()].append(line)
+    if len(transcript_log[radio.upper()]) > MAX_TRANSCRIPT_LINES:
+        transcript_log[radio.upper()] = transcript_log[radio.upper()][-MAX_TRANSCRIPT_LINES:]
     logfile = os.path.join(LOG_DIR, f"{datetime.now().date()}.log")
     with open(logfile, "a") as f:
         f.write(line + "\n")

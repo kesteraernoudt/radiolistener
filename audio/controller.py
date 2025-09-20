@@ -20,7 +20,7 @@ class ExceptionThread(threading.Thread):
 class RadioController:
     def __init__(self, config, radio_conf_path, listener):
         self.radio_conf_path = radio_conf_path
-        self.audio_queue = queue.Queue()
+        self.audio_queue = queue.Queue(maxsize=100)
         self.capture_thread = None
         self.process_thread = None
         self.processor = None

@@ -49,11 +49,15 @@
 </head>
 
 <body>
+
   <h1>Audio Monitor</h1>
+  <div style="margin-bottom: 20px;">
+    <a href="javascript:void(0)" id="filebrowser-link" target="_blank">Open File Browser</a>
+  </div>
 
   <div class="section">
     <h2>Main Config</h2>
-    <textarea id="config">{{ config | tojson(indent=2) }}</textarea><br>
+    <textarea id="config">{{ config | tojson(indent = 2)}}</textarea><br>
     <button onclick="saveConfig()">Save Config</button>
   </div>
 
@@ -73,7 +77,7 @@
     </div>
     <div>
       <h3>Radio Config (Advanced)</h3>
-      <textarea id="radio_conf_{{ radio.name }}">{{ radio.conf | tojson(indent=2) }}</textarea><br>
+      <textarea id="radio_conf_{{ radio.name }}">{{ radio.conf | tojson(indent = 2) }}</textarea><br>
       <button onclick="saveRadioConf('{{ radio.name }}')">Save Radio Config</button>
     </div>
     <div>
@@ -90,8 +94,16 @@
   {% endfor %}
 
   <script>
+    // Set file browser link to same host, port 3002
+    document.addEventListener("DOMContentLoaded", function () {
+      var link = document.getElementById("filebrowser-link");
+      var host = window.location.hostname;
+      var protocol = window.location.protocol;
+      link.href = protocol + '//' + host + ':3002';
+    });
+
     const MATCH_OPTIONS = ["contains", "regex", "exact"];
-    let radios = {{ radios | tojson }};
+    let radios = {{ radios | tojson}};
 
     function saveConfig() {
       fetch('/update_config', {
@@ -134,11 +146,11 @@
         const div = document.createElement("div");
         div.style.marginBottom = "5px";
         div.innerHTML = `
-          <input type="text" value="${ph.text}" style="width:60%" onchange="updatePhraseText('${name}',${idx}, this.value)">
-          <select onchange="updatePhraseMatch('${name}',${idx}, this.value)">
-            ${MATCH_OPTIONS.map(opt => `<option value="${opt}"${ph.mode === opt ? " selected" : ""}>${opt}</option>`).join("")}
-          </select>
-          <button onclick="deletePhrase('${name}',${idx})">Delete</button>
+      <input type="text" value="${ph.text}" style="width:60%" onchange="updatePhraseText('${name}',${idx}, this.value)">
+        <select onchange="updatePhraseMatch('${name}',${idx}, this.value)">
+          ${MATCH_OPTIONS.map(opt => `<option value="${opt}"${ph.mode === opt ? " selected" : ""}>${opt}</option>`).join("")}
+        </select>
+        <button onclick="deletePhrase('${name}',${idx})">Delete</button>
         `;
         list.appendChild(div);
       });
@@ -176,6 +188,15 @@
       }).then(() => alert("Phrases saved!"));
     }
 
+    document.addEventListener("DOMContentLoaded", function () {
+      radios.forEach(radio => {
+        renderPhrases(radio.name);
+        reloadLogs(radio.name);
+        document.getElementById("radio_conf_" + radio.name).value = JSON.stringify(radio.conf, null, 2);
+      });
+    });
+
+    /*
     window.onload = function () {
       radios.forEach(radio => {
         renderPhrases(radio.name);
@@ -183,6 +204,7 @@
         document.getElementById("radio_conf_" + radio.name).value = JSON.stringify(radio.conf, null, 2);
       });
     }
+    */
   </script>
 </body>
 
