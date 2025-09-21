@@ -1,0 +1,12 @@
+.env
+logs/
+clips/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+*.wav
+*.mp3
+*.ogg
+.DS_Store
+cmdlinelog.txt
