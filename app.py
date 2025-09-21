@@ -40,6 +40,7 @@ class RadioListener():
         self.CONFIG["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
         self.telegramBot = TelegramBot(listener.CONFIG["TELEGRAM_BOT_TOKEN"], self)
         for radio_conf_path in self.CONFIG["RADIO_CONFIGS"]:
+            radio_conf_path = os.path.join("config", radio_conf_path)
             with open(radio_conf_path) as rf:
                 radio_conf = json.load(rf)
                 name = radio_conf["NAME"].upper()
@@ -62,5 +63,5 @@ class RadioListener():
         routes.app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
 
 if __name__ == "__main__":
-    listener = RadioListener("config.json")
+    listener = RadioListener("config/config.json")
     listener.start()

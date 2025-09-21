@@ -1,7 +1,7 @@
-Flask==2.3.5
-openai-whisper==20230314
-numpy==1.27.4
-ffmpeg-python==0.3.0
+Flask
+openai-whisper
+numpy
+ffmpeg-python
 python-telegram-bot[all]
 google-genai
 dotenv
