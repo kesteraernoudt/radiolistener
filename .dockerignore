@@ -10,3 +10,4 @@ __pycache__/
 *.ogg
 .DS_Store
 cmdlinelog.txt
+config/

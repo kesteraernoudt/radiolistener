@@ -17,7 +17,7 @@ class StreamProcessor:
                  pre_prompt_file: str = "",
                  controller=None):
         self.radio_conf = radio_conf
-        self.whisper_model = whisper.load_model(asr_whisper_model)
+        self.whisper_model = whisper.load_model(asr_whisper_model, download_root='config')
         self.buffer_seconds = buffer_seconds
         self.buffer_overlap = buffer_overlap
         self.sample_rate = sample_rate
@@ -66,7 +66,7 @@ class StreamProcessor:
         last_match = ""
         while self.controller.running:
             try:
-                data = queue.get(timeout=1)
+                data = queue.popleft()
             except:
                 continue
 

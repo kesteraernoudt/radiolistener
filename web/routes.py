@@ -1,8 +1,12 @@
 from flask import Flask, render_template, request, jsonify
 import os, json
 from utils import logger
+import logging
 
 app = Flask(__name__, template_folder="templates")
+
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 
 listener = None  # Set this from app.py
 

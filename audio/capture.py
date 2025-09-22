@@ -10,7 +10,7 @@ def capture_stream(q, stream_url, controller):
         data = proc.stdout.read(4096)
         if not data:
             break
-        q.put(data)
+        q.append(data)
     proc.terminate()
     proc.wait()
     

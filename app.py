@@ -9,6 +9,10 @@ from audio import process
 from utils.telegram_bot import TelegramBot
 from dotenv import load_dotenv
 import os
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
 
 class RadioListener():
     def __init__(self, config_path):

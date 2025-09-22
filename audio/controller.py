@@ -1,8 +1,9 @@
 import threading
-import queue
+from collections import deque
 import json
 from audio import capture, process
 from utils import logger, telegram_notifier, telegram_bot
+import logging
 
 
 class ExceptionThread(threading.Thread):
@@ -20,7 +21,7 @@ class ExceptionThread(threading.Thread):
 class RadioController:
     def __init__(self, config, radio_conf_path, listener):
         self.radio_conf_path = radio_conf_path
-        self.audio_queue = queue.Queue(maxsize=100)
+        self.audio_queue = deque(maxlen=100)
         self.capture_thread = None
         self.process_thread = None
         self.processor = None
@@ -49,12 +50,15 @@ class RadioController:
 
     def stop(self):
         self.running = False
+        logging.debug(f"Stopping RadioController for {self.RADIO_CONF.get('NAME','UNKNOWN')}")
         if self.capture_thread:
             self.capture_thread.join(timeout=5)
         if self.process_thread:
             self.process_thread.join(timeout=5)
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
+        logging.debug(f"Stopped RadioController for {self.RADIO_CONF.get('NAME','UNKNOWN')}")
+
     def _monitor_threads(self):
         while self.running:
             # Monitor capture thread
@@ -93,9 +97,12 @@ class RadioController:
         self.listener.telegramBot.send_sms_message(self.RADIO_CONF["SMS_NUMBER"], text)
 
     def _start_capture(self):
+        logging.debug(f"Starting capture thread for {self.RADIO_CONF.get('NAME','UNKNOWN')}")
         capture.capture_stream(self.audio_queue, self.RADIO_CONF["STREAM_URL"], self)
+        logging.debug(f"Capture thread for {self.RADIO_CONF.get('NAME','UNKNOWN')} has exited")
 
     def _start_processing(self):
+        logging.debug(f"Starting processing thread for {self.RADIO_CONF.get('NAME','UNKNOWN')}")
         self.processor = process.StreamProcessor(
             self.RADIO_CONF,
             self.CONFIG["WHISPER_MODEL"],
@@ -108,3 +115,4 @@ class RadioController:
             self
         )
         self.processor.process_audio(self.audio_queue)
+        logging.debug(f"Processing thread for {self.RADIO_CONF.get('NAME','UNKNOWN')} has exited")

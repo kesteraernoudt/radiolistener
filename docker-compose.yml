@@ -1,15 +1,31 @@
-version: '3.8'
-
 services:
   radio-listener:
     build: .
     container_name: radio-listener
     ports:
       - "5000:5000"
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=America/Los_Angeles
     env_file:
       - .env
     volumes:
       - ./logs:/app/logs
       - ./clips:/app/clips
       - ./config:/app/config
+    restart: unless-stopped
+  filebrowser:
+    image: hurlenko/filebrowser
+    ports:
+      - 3002:8080
+    volumes:
+      - ./fb_config:/config
+      - .:/data
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=America/Los_Angeles
+      - FB_BASEURL=/filebrowser
+      - FB_NOAUTH=true
     restart: unless-stopped

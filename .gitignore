@@ -4,3 +4,5 @@ __pycache__/
 clips/
 logs/
 cmdlinelog.txt
+config/base.pt
+config/small.pt
