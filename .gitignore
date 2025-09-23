@@ -6,3 +6,4 @@ logs/
 cmdlinelog.txt
 config/base.pt
 config/small.pt
+fb_config/

@@ -4,4 +4,4 @@ numpy
 ffmpeg-python
 python-telegram-bot[all]
 google-genai
-
+python-dotenv
