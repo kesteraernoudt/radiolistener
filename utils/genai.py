@@ -32,6 +32,7 @@ class GenAIHandler:
                 model=self.MODEL,
                 contents=self.PRE_PROMPT + prompt
             )
+            logger.log_ai_event(f"GenAIHandler response: {response.text}")
             return response.text
         except Exception as e:
             print(f"GenAIHandler generate error: {e}")

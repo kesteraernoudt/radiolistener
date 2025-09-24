@@ -10,5 +10,5 @@
     "alice.json",
     "99.7now.json"
   ],
-  "WHISPER_MODEL": "base"
+  "WHISPER_MODEL": "medium"
 }
