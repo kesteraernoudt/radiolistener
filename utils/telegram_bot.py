@@ -2,6 +2,7 @@ import asyncio
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from utils import logger
+from audio import clip_saver
 
 class TelegramBot():
     def __init__(self, token, radioListener):
@@ -20,7 +21,7 @@ class TelegramBot():
         self.app.add_handler(CommandHandler(['ai','a'], self.ai_command))
         self.app.add_handler(CommandHandler(['radios','radio','r'], self.radios_command))
         self.app.add_handler(CallbackQueryHandler(self.button))
-        
+        self.app.add_handler(CommandHandler(['clip','c'], self.clip_command))
         self.app.run_polling()
 
     async def start_command(self, update, context):
@@ -78,6 +79,63 @@ class TelegramBot():
         if msg:
             codeword = controller.processor.genAIHandler.generate(msg)
             await update.message.reply_text(codeword if codeword else "No codeword found")
+
+    async def clip_command(self, update, context):
+        """Save current audio buffer and send context + audio to the invoking chat.
+
+        Usage examples:
+        /clip            -> save clip for default radio (first available) and send last CONTEXT_LEN lines
+        /clip 5          -> save clip and send last 5 lines
+        /clip station    -> save clip for station (prefix match)
+        /clip 4 station  -> save clip for station with 4 context lines
+        """
+        num_lines = None
+        radio = ""
+        arg = 0
+        # parse first arg as number if present
+        if len(context.args) > arg and context.args[arg].isdigit():
+            num_lines = int(context.args[arg])
+            arg += 1
+        if len(context.args) > arg:
+            radio = context.args[arg]
+
+        controller = self.radioListener.controller(radio)
+        if controller is None or controller.processor is None:
+            await update.message.reply_text(f"No such radio station found ({radio}) or processor not initialized.")
+            return
+
+        processor = controller.processor
+        if num_lines is None:
+            # default to processor CONTEXT_LEN if available, else 3
+            num_lines = getattr(processor, 'CONTEXT_LEN', 3)
+
+        # snapshot rolling buffer and previous texts
+        audio_bytes = processor.rolling_buffer if processor.rolling_buffer else b""
+        if not audio_bytes:
+            await update.message.reply_text("No audio in buffer to save.")
+            return
+
+        try:
+            filename = clip_saver.save_clip(audio_bytes)
+        except Exception as e:
+            await update.message.reply_text(f"Failed to save clip: {e}")
+            return
+
+        # build context text
+        context_text = "\n".join(processor.previous_texts[-num_lines:]) if processor.previous_texts else ""
+        header = f"Clip saved for {controller.RADIO_CONF.get('NAME','UNKNOWN')}\n"
+        if context_text:
+            await update.message.reply_text(header + "Context:\n" + context_text)
+        else:
+            await update.message.reply_text(header + "(no recent speech captured)")
+
+        # send audio file back to invoking chat
+        try:
+            # use reply_audio if available
+            with open(filename, 'rb') as af:
+                await update.message.reply_audio(audio=af, caption=f"Saved clip from {controller.RADIO_CONF.get('NAME','UNKNOWN')}")
+        except Exception as e:
+            await update.message.reply_text(f"Clip saved to {filename} but failed to send audio: {e}")
 
     def send_message(self, text):
         if self.app is None:
