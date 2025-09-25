@@ -42,7 +42,7 @@ class RadioListener():
         self.CONFIG["TELEGRAM_BOT_TOKEN"] = os.getenv("TELEGRAM_BOT_TOKEN")
         self.CONFIG["TELEGRAM_CHAT_ID"] = os.getenv("TELEGRAM_CHAT_ID")
         self.CONFIG["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
-        self.telegramBot = TelegramBot(listener.CONFIG["TELEGRAM_BOT_TOKEN"], self)
+        self.telegramBot = TelegramBot(self.CONFIG["TELEGRAM_BOT_TOKEN"], self)
         for radio_conf_path in self.CONFIG["RADIO_CONFIGS"]:
             radio_conf_path = os.path.join("config", radio_conf_path)
             with open(radio_conf_path) as rf:
@@ -60,7 +60,7 @@ class RadioListener():
         controller = self.controller(radio)
         if controller is None or controller.processor is None:
             return ""
-        return "\n".join(self.controller.processor.previous_texts[-num_lines:])
+        return "\n".join(controller.processor.previous_texts[-num_lines:])
     
     def _start_flask(self):
         routes.listener = self

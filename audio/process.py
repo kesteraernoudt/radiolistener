@@ -4,6 +4,7 @@ from datetime import datetime
 import numpy as np
 from utils import logger, telegram_notifier, genai
 import whisper
+import threading
 
 class StreamProcessor:
     CONTEXT_LEN = 3
@@ -33,6 +34,7 @@ class StreamProcessor:
         self.previous_texts = []
         self.last_alert_time = 0
         self.do_save_full_clip = 0
+        self.lock = threading.Lock()
 
     def phrase_matches(self, text, phrases):
         for phrase in phrases:
@@ -70,51 +72,68 @@ class StreamProcessor:
             except:
                 continue
 
-            self.rolling_buffer += data
-            # Trim buffer to max size
-            if len(self.rolling_buffer) > self.max_buffer_size:
-                trim_amount = len(self.rolling_buffer) - self.max_buffer_size
-                self.rolling_buffer = self.rolling_buffer[-self.max_buffer_size:]
-                self.window_start = max(0, self.window_start - trim_amount)
+            # add incoming data under lock
+            with self.lock:
+                self.rolling_buffer += data
+                # Trim buffer to max size
+                if len(self.rolling_buffer) > self.max_buffer_size:
+                    trim_amount = len(self.rolling_buffer) - self.max_buffer_size
+                    self.rolling_buffer = self.rolling_buffer[-self.max_buffer_size:]
+                    self.window_start = max(0, self.window_start - trim_amount)
 
-            # Process as many windows as possible
-            while self.window_start + self.frame_size <= len(self.rolling_buffer):
-                buffer = self.rolling_buffer[self.window_start:self.window_start + self.frame_size]
+            # Process as many windows as possible. We grab each frame under lock
+            # but do transcription and heavy work outside the lock.
+            while True:
+                with self.lock:
+                    if self.window_start + self.frame_size <= len(self.rolling_buffer):
+                        frame_start = self.window_start
+                        frame_end = self.window_start + self.frame_size
+                        # move window_start now to avoid reprocessing while we transcribe
+                        self.window_start += self.step_size
+                        buffer = self.rolling_buffer[frame_start:frame_end]
+                    else:
+                        buffer = None
+
+                if buffer is None:
+                    break
+
+                # Heavy work outside the lock
                 audio_np = np.frombuffer(buffer, np.int16).astype("float32") / 32768.0
                 whisper_result = self.whisper_model.transcribe(audio_np, fp16=False)
                 text = whisper_result.get("text", "").strip()
 
                 if text:
+                    # handle last_match branch (use last_match variable)
                     if last_match:
-                        last_match = ""  # reset last match after using it
                         context = f"{self.previous_texts[-1] if self.previous_texts else ''} {text}"
                         code_word = self.genAIHandler.generate(context)
                         if code_word:
-                            self.send_alert(matches, code_word, context)
+                            self.send_alert(last_match, code_word, context)
                         else:
-                            logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {matches}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
+                            logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {last_match}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
+                        last_match = ""  # reset last match after using it
                     if self.do_save_full_clip:
-                        last_clip_path = clip_saver.save_clip(self.rolling_buffer)
-                        #telegram_notifier.send_telegram_audio(last_clip_path, caption="")
+                        with self.lock:
+                            snapshot = bytes(self.rolling_buffer)
+                            self.do_save_full_clip = 0
+                        last_clip_path = clip_saver.save_clip(snapshot)
                         self.controller.send_audio(last_clip_path, caption="")
-                        #telegram_notifier.send_telegram(
-                        #    "context:\n" + "\n".join(self.previous_texts[-self.CONTEXT_LEN:]) + "\n" + text
-                        #)
-                        #self.controller.send_message("context:\n" + "\n".join(self.previous_texts[-self.CONTEXT_LEN:]) + "\n" + text)
-                        self.do_save_full_clip = 0
+
                     logger.log_event(self.radio_conf['NAME'], text)
+
+                    # determine matches and update previous_texts under lock
                     matches = self.phrase_matches(text, self.radio_conf["PHRASES"])
                     if matches:
-                        # check with genai if there is a code word
                         context = f"{self.previous_texts[-1] if self.previous_texts else ''} {text}"
                         code_word = self.genAIHandler.generate(context)
                         if code_word:
                             self.send_alert(matches, code_word, context)
                         else:
                             logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {matches}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
-                            last_match = matches # try again when next match is there
-                    self.previous_texts.append(text)
-                    if len(self.previous_texts) > self.MAX_MSG_STORAGE:
-                        self.previous_texts = self.previous_texts[-self.MAX_MSG_STORAGE:]
-                self.window_start += self.step_size
+                            last_match = matches
+
+                    with self.lock:
+                        self.previous_texts.append(text)
+                        if len(self.previous_texts) > self.MAX_MSG_STORAGE:
+                            self.previous_texts = self.previous_texts[-self.MAX_MSG_STORAGE:]
 

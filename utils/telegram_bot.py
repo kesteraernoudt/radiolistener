@@ -110,7 +110,11 @@ class TelegramBot():
             num_lines = getattr(processor, 'CONTEXT_LEN', 3)
 
         # snapshot rolling buffer and previous texts
-        audio_bytes = processor.rolling_buffer if processor.rolling_buffer else b""
+        with processor.lock:
+            audio_bytes = bytes(processor.rolling_buffer) if processor.rolling_buffer else b""
+            context_slice = list(processor.previous_texts[-num_lines:]) if processor.previous_texts else []
+        context_text = "\n".join(context_slice) if context_slice else ""
+
         if not audio_bytes:
             await update.message.reply_text("No audio in buffer to save.")
             return
