@@ -5,6 +5,7 @@ import numpy as np
 from utils import logger, telegram_notifier, genai
 import whisper
 import threading
+import logging
 
 class StreamProcessor:
     CONTEXT_LEN = 3
@@ -63,6 +64,15 @@ class StreamProcessor:
             #self.controller.send_sms_message(code_word)
             self.last_alert_time = now
             self.do_save_full_clip = 1
+    
+    def handle_match(self, match, text):
+        context = f"{self.previous_texts[-1] if self.previous_texts else ''} {text}"
+        code_word = self.genAIHandler.generate(context)
+        if code_word:
+            self.send_alert(match, code_word, context)
+        else:
+            logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {match}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
+        return code_word
 
     def process_audio(self, queue):
         last_match = ""
@@ -97,20 +107,24 @@ class StreamProcessor:
                 if buffer is None:
                     break
 
+                t0 = time.time()
+
                 # Heavy work outside the lock
                 audio_np = np.frombuffer(buffer, np.int16).astype("float32") / 32768.0
                 whisper_result = self.whisper_model.transcribe(audio_np, fp16=False)
                 text = whisper_result.get("text", "").strip()
 
+                t_transcribe = time.time() - t0
+
+                t_ai = 0
+                t_match = 0
+
                 if text:
-                    # handle last_match branch (use last_match variable)
-                    if last_match:
-                        context = f"{self.previous_texts[-1] if self.previous_texts else ''} {text}"
-                        code_word = self.genAIHandler.generate(context)
-                        if code_word:
-                            self.send_alert(last_match, code_word, context)
-                        else:
-                            logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {last_match}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
+                    if last_match: # there was a previous match but no codeword found
+                        t_ai_start = time.time()
+                        self.handle_match(last_match, text)
+                        t_ai_end = time.time()
+                        t_ai = t_ai + t_ai_end - t_ai_start
                         last_match = ""  # reset last match after using it
                     if self.do_save_full_clip:
                         with self.lock:
@@ -122,18 +136,23 @@ class StreamProcessor:
                     logger.log_event(self.radio_conf['NAME'], text)
 
                     # determine matches and update previous_texts under lock
+                    t_match_start = time.time()
                     matches = self.phrase_matches(text, self.radio_conf["PHRASES"])
+                    t_match_end = time.time()
+                    t_match = t_match_end - t_match_start
                     if matches:
-                        context = f"{self.previous_texts[-1] if self.previous_texts else ''} {text}"
-                        code_word = self.genAIHandler.generate(context)
-                        if code_word:
-                            self.send_alert(matches, code_word, context)
-                        else:
-                            logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {matches}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
-                        last_match = matches
+                        t_ai_start = time.time()
+                        code_word = self.handle_match(matches, text)
+                        t_ai_end = time.time()
+                        t_ai = t_ai + t_ai_end - t_ai_start
+                        if not code_word: # no codeword found, save for next round
+                            last_match = matches
 
                     with self.lock:
                         self.previous_texts.append(text)
                         if len(self.previous_texts) > self.MAX_MSG_STORAGE:
                             self.previous_texts = self.previous_texts[-self.MAX_MSG_STORAGE:]
+
+                t_process = time.time() - t0
+                logging.debug(f"{self.radio_conf.get('NAME','UNKNOWN')}: process_time={t_process:.2f}, transcribe_time={t_transcribe:.2f}, ai_time={t_ai:.2f}, match_time={t_match:.2f}, buffer_seconds = {self.buffer_seconds}")
 

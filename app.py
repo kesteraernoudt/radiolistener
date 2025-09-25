@@ -14,7 +14,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 
-class RadioListener():
+class RadioListener:
     def __init__(self, config_path):
         super().__init__()
         self.config_path = config_path
@@ -48,10 +48,12 @@ class RadioListener():
             with open(radio_conf_path) as rf:
                 radio_conf = json.load(rf)
                 name = radio_conf["NAME"].upper()
-                self.controllers[name] = RadioController(self.CONFIG, radio_conf_path, self)
+                self.controllers[name] = RadioController(
+                    self.CONFIG, radio_conf_path, self
+                )
                 self.controllers[name].start()
-        #self.controller = RadioController(self.CONFIG, "106.5.json", self)
-        #self.controller.start()
+        # self.controller = RadioController(self.CONFIG, "106.5.json", self)
+        # self.controller.start()
         self.flask_thread = threading.Thread(target=self._start_flask, daemon=True)
         self.flask_thread.start()
         self.telegramBot.bot_main()
@@ -61,10 +63,11 @@ class RadioListener():
         if controller is None or controller.processor is None:
             return ""
         return "\n".join(controller.processor.previous_texts[-num_lines:])
-    
+
     def _start_flask(self):
         routes.listener = self
         routes.app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+
 
 if __name__ == "__main__":
     listener = RadioListener("config/config.json")

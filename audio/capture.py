@@ -10,7 +10,7 @@ def capture_stream(q, stream_url, controller):
     while controller.running:
         data = proc.stdout.read(4096)
         if not data:
-            break
+            continue
         if len(q) == q.maxlen:
             logger.log_event(controller.RADIO_CONF['NAME'], "Audio queue full, dropping audio data")
         q.append(data)

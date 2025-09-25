@@ -57,6 +57,7 @@ class RadioController:
             self.process_thread.join(timeout=5)
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
+        self.audio_queue.clear()
         logging.debug(f"Stopped RadioController for {self.RADIO_CONF.get('NAME','UNKNOWN')}")
 
     def _monitor_threads(self):
@@ -81,6 +82,7 @@ class RadioController:
                     logger.log_event(f"{self.RADIO_CONF.get('NAME','UNKNOWN')}","Process thread stopped unexpectedly. Restarting...")
                 self.process_thread = ExceptionThread(target=self._start_processing, daemon=True)
                 self.process_thread.start()
+            logging.debug(f"{self.RADIO_CONF.get('NAME','UNKNOWN')}: [MONITOR] Queue size: {len(self.audio_queue)}/{self.audio_queue.maxlen}")
             threading.Event().wait(5)
 
     def restart(self):
