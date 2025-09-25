@@ -130,7 +130,7 @@ class StreamProcessor:
                             self.send_alert(matches, code_word, context)
                         else:
                             logger.log_event(self.radio_conf['NAME'], f"No code word found for match: {matches}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}")
-                            last_match = matches
+                        last_match = matches
 
                     with self.lock:
                         self.previous_texts.append(text)
