@@ -1,4 +1,5 @@
 import subprocess
+from utils import logger
 
 def capture_stream(q, stream_url, controller):
     cmd = [
@@ -10,6 +11,8 @@ def capture_stream(q, stream_url, controller):
         data = proc.stdout.read(4096)
         if not data:
             break
+        if len(q) == q.maxlen:
+            logger.log_event(controller.RADIO_CONF['NAME'], "Audio queue full, dropping audio data")
         q.append(data)
     proc.terminate()
     proc.wait()

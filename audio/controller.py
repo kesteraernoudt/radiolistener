@@ -21,7 +21,7 @@ class ExceptionThread(threading.Thread):
 class RadioController:
     def __init__(self, config, radio_conf_path, listener):
         self.radio_conf_path = radio_conf_path
-        self.audio_queue = deque(maxlen=100)
+        self.audio_queue = deque(maxlen=1000)
         self.capture_thread = None
         self.process_thread = None
         self.processor = None
@@ -43,8 +43,8 @@ class RadioController:
         self.running = True
         self.capture_thread = ExceptionThread(target=self._start_capture, daemon=True)
         self.process_thread = ExceptionThread(target=self._start_processing, daemon=True)
-        self.capture_thread.start()
         self.process_thread.start()
+        self.capture_thread.start()
         self.monitor_thread = threading.Thread(target=self._monitor_threads, daemon=True)
         self.monitor_thread.start()
 
