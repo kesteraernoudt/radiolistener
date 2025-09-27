@@ -18,10 +18,13 @@ class ExceptionThread(threading.Thread):
         except Exception as e:
             self.exception = e
 
+
 class RadioController:
+    MAX_QUEUE_SIZE = 1000
+
     def __init__(self, config, radio_conf_path, listener):
         self.radio_conf_path = radio_conf_path
-        self.audio_queue = deque(maxlen=1000)
+        self.audio_queue = deque(maxlen=self.MAX_QUEUE_SIZE)
         self.capture_thread = None
         self.process_thread = None
         self.processor = None
@@ -31,6 +34,21 @@ class RadioController:
         self.RADIO_CONF = {}
         self.monitor_thread = None
         self.load_configs()
+
+    def get_stats(self):
+        stats = {
+            "queue_size": len(self.audio_queue),
+            "max_queue_size": self.audio_queue.maxlen,
+            "capture_thread_alive": (
+                self.capture_thread.is_alive() if self.capture_thread else False
+            ),
+            "process_thread_alive": (
+                self.process_thread.is_alive() if self.process_thread else False
+            ),
+        }
+        if self.processor:
+            stats.update(self.processor.get_stats())
+        return stats
 
     def load_configs(self):
         with open(self.radio_conf_path) as f:
@@ -42,15 +60,21 @@ class RadioController:
         self.load_configs()
         self.running = True
         self.capture_thread = ExceptionThread(target=self._start_capture, daemon=True)
-        self.process_thread = ExceptionThread(target=self._start_processing, daemon=True)
+        self.process_thread = ExceptionThread(
+            target=self._start_processing, daemon=True
+        )
         self.process_thread.start()
         self.capture_thread.start()
-        self.monitor_thread = threading.Thread(target=self._monitor_threads, daemon=True)
+        self.monitor_thread = threading.Thread(
+            target=self._monitor_threads, daemon=True
+        )
         self.monitor_thread.start()
 
     def stop(self):
         self.running = False
-        logging.debug(f"Stopping RadioController for {self.RADIO_CONF.get('NAME','UNKNOWN')}")
+        logging.debug(
+            f"Stopping RadioController for {self.RADIO_CONF.get('NAME','UNKNOWN')}"
+        )
         if self.capture_thread:
             self.capture_thread.join(timeout=5)
         if self.process_thread:
@@ -58,31 +82,59 @@ class RadioController:
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
         self.audio_queue.clear()
-        logging.debug(f"Stopped RadioController for {self.RADIO_CONF.get('NAME','UNKNOWN')}")
+        logging.debug(
+            f"Stopped RadioController for {self.RADIO_CONF.get('NAME','UNKNOWN')}"
+        )
 
     def _monitor_threads(self):
         while self.running:
             # Monitor capture thread
-            if self.capture_thread and (self.capture_thread.exception or not self.capture_thread.is_alive()):
+            if self.capture_thread and (
+                self.capture_thread.exception or not self.capture_thread.is_alive()
+            ):
                 if self.capture_thread.exception:
-                    print(f"Capture thread crashed: {self.capture_thread.exception}. Restarting...")
-                    logger.log_event(f"{self.RADIO_CONF.get('NAME','UNKNOWN')}","Capture thread crashed: {self.capture_thread.exception}. Restarting...")
+                    print(
+                        f"Capture thread crashed: {self.capture_thread.exception}. Restarting..."
+                    )
+                    logger.log_event(
+                        f"{self.RADIO_CONF.get('NAME','UNKNOWN')}",
+                        "Capture thread crashed: {self.capture_thread.exception}. Restarting...",
+                    )
                 else:
                     print("Capture thread stopped unexpectedly. Restarting...")
-                    logger.log_event(f"{self.RADIO_CONF.get('NAME','UNKNOWN')}","Capture thread stopped unexpectedly. Restarting...")
-                self.capture_thread = ExceptionThread(target=self._start_capture, daemon=True)
+                    logger.log_event(
+                        f"{self.RADIO_CONF.get('NAME','UNKNOWN')}",
+                        "Capture thread stopped unexpectedly. Restarting...",
+                    )
+                self.capture_thread = ExceptionThread(
+                    target=self._start_capture, daemon=True
+                )
                 self.capture_thread.start()
             # Monitor process thread
-            if self.process_thread and (self.process_thread.exception or not self.process_thread.is_alive()):
+            if self.process_thread and (
+                self.process_thread.exception or not self.process_thread.is_alive()
+            ):
                 if self.process_thread.exception:
-                    print(f"Process thread crashed: {self.process_thread.exception}. Restarting...")
-                    logger.log_event(f"{self.RADIO_CONF.get('NAME','UNKNOWN')}","Process thread crashed: {self.process_thread.exception}. Restarting...")
+                    print(
+                        f"Process thread crashed: {self.process_thread.exception}. Restarting..."
+                    )
+                    logger.log_event(
+                        f"{self.RADIO_CONF.get('NAME','UNKNOWN')}",
+                        "Process thread crashed: {self.process_thread.exception}. Restarting...",
+                    )
                 else:
                     print("Process thread stopped unexpectedly. Restarting...")
-                    logger.log_event(f"{self.RADIO_CONF.get('NAME','UNKNOWN')}","Process thread stopped unexpectedly. Restarting...")
-                self.process_thread = ExceptionThread(target=self._start_processing, daemon=True)
+                    logger.log_event(
+                        f"{self.RADIO_CONF.get('NAME','UNKNOWN')}",
+                        "Process thread stopped unexpectedly. Restarting...",
+                    )
+                self.process_thread = ExceptionThread(
+                    target=self._start_processing, daemon=True
+                )
                 self.process_thread.start()
-            logging.debug(f"{self.RADIO_CONF.get('NAME','UNKNOWN')}: [MONITOR] Queue size: {len(self.audio_queue)}/{self.audio_queue.maxlen}")
+            logging.debug(
+                f"{self.RADIO_CONF.get('NAME','UNKNOWN')}: [MONITOR] Queue size: {len(self.audio_queue)}/{self.audio_queue.maxlen}"
+            )
             threading.Event().wait(5)
 
     def restart(self):
@@ -99,12 +151,18 @@ class RadioController:
         self.listener.telegramBot.send_sms_message(self.RADIO_CONF["SMS_NUMBER"], text)
 
     def _start_capture(self):
-        logging.debug(f"Starting capture thread for {self.RADIO_CONF.get('NAME','UNKNOWN')}")
+        logging.debug(
+            f"Starting capture thread for {self.RADIO_CONF.get('NAME','UNKNOWN')}"
+        )
         capture.capture_stream(self.audio_queue, self.RADIO_CONF["STREAM_URL"], self)
-        logging.debug(f"Capture thread for {self.RADIO_CONF.get('NAME','UNKNOWN')} has exited")
+        logging.debug(
+            f"Capture thread for {self.RADIO_CONF.get('NAME','UNKNOWN')} has exited"
+        )
 
     def _start_processing(self):
-        logging.debug(f"Starting processing thread for {self.RADIO_CONF.get('NAME','UNKNOWN')}")
+        logging.debug(
+            f"Starting processing thread for {self.RADIO_CONF.get('NAME','UNKNOWN')}"
+        )
         self.processor = process.StreamProcessor(
             self.RADIO_CONF,
             self.CONFIG["WHISPER_MODEL"],
@@ -114,7 +172,9 @@ class RadioController:
             self.CONFIG["CLIP_DURATION"],
             self.CONFIG["GEMINI_API_KEY"],
             self.CONFIG["AI_PRE_PROMPT_FILE"],
-            self
+            self,
         )
         self.processor.process_audio(self.audio_queue)
-        logging.debug(f"Processing thread for {self.RADIO_CONF.get('NAME','UNKNOWN')} has exited")
+        logging.debug(
+            f"Processing thread for {self.RADIO_CONF.get('NAME','UNKNOWN')} has exited"
+        )

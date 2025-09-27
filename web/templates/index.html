@@ -76,7 +76,11 @@
       <div id="logbox-{{ radio.name }}" class="logbox">{{ radio.logs | join('\n') }}</div>
     </div>
     <div>
-      <h3>Radio Config (Advanced)</h3>
+      <h3>Radio Stats</h3>
+      <textarea id="radio_stats_{{ radio.name }}">{{ radio.stats | tojson(indent = 2) }}</textarea><br>
+    </div>
+    <div>
+      <h3>Radio Config</h3>
       <textarea id="radio_conf_{{ radio.name }}">{{ radio.conf | tojson(indent = 2) }}</textarea><br>
       <button onclick="saveRadioConf('{{ radio.name }}')">Save Radio Config</button>
     </div>
@@ -137,6 +141,16 @@
         });
     }
 
+    function reloadStats(name) {
+      fetch(`/radio/${name}/stats`)
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById("radio_stats_" + name).value = JSON.stringify(data.stats, null, 2);
+          document.getElementById("radio_stats_" + name).scrollTop = document.getElementById("radio_stats_" + name).scrollHeight;
+          setTimeout(() => reloadStats(name), 2000);
+        });
+    }
+
     function renderPhrases(name) {
       let radio = radios.find(r => r.name === name);
       let phrases = radio.conf.PHRASES || [];
@@ -192,6 +206,7 @@
       radios.forEach(radio => {
         renderPhrases(radio.name);
         reloadLogs(radio.name);
+        reloadStats(radio.name);
         document.getElementById("radio_conf_" + radio.name).value = JSON.stringify(radio.conf, null, 2);
       });
     });
