@@ -20,7 +20,7 @@ class ExceptionThread(threading.Thread):
 
 
 class RadioController:
-    MAX_QUEUE_SIZE = 1000
+    MAX_QUEUE_SIZE = 100
 
     def __init__(self, config, radio_conf_path, listener):
         self.radio_conf_path = radio_conf_path
