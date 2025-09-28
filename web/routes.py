@@ -6,7 +6,7 @@ import logging
 app = Flask(__name__, template_folder="templates")
 
 log = logging.getLogger("werkzeug")
-# log.setLevel(logging.ERROR)
+log.setLevel(logging.ERROR)
 
 listener = None  # Set this from app.py
 
