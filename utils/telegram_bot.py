@@ -19,7 +19,8 @@ class TelegramBot():
         self.app.add_handler(CommandHandler(['log','l'], self.log_command))
         self.app.add_handler(CommandHandler(['text','t'], self.text_command))
         self.app.add_handler(CommandHandler(['ai','a'], self.ai_command))
-        self.app.add_handler(CommandHandler(['radios','radio','r'], self.radios_command))
+        self.app.add_handler(CommandHandler(['radios','radio'], self.radios_command))
+        self.app.add_handler(CommandHandler(['restart','r'], self.restart_command))
         self.app.add_handler(CallbackQueryHandler(self.button))
         self.app.add_handler(CommandHandler(['clip','c'], self.clip_command))
         self.app.run_polling()
@@ -44,6 +45,17 @@ class TelegramBot():
         radios = "\n".join(self.radioListener.controllers.keys())
         if radios:
             await update.message.reply_text(radios)
+
+    async def restart_command(self, update, context):
+        radio = ""
+        if len(context.args) > 0:
+            radio = context.args[0]
+        controller = self.radioListener.controller(radio)
+        if controller is None:
+            await update.message.reply_text(f"No such radio station found ({radio})")
+            return
+        controller.restart()
+        await update.message.reply_text(f"Restarted {controller.RADIO_CONF.get('NAME','UNKNOWN')}")
 
     async def text_command(self, update, context):
         num_lines = 10

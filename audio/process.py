@@ -44,6 +44,13 @@ class StreamProcessor:
         self.last_alert_time = 0
         self.do_save_full_clip = 0
         self.lock = threading.Lock()
+        self.stats = {
+            "t_transcribe": 0,
+            "t_ai": 0,
+            "t_match": 0,
+            "t_process": 0,
+            "t_max_process": 0,
+        }
 
     def get_stats(self):  # todo, update with processing times
         stats = {
@@ -58,6 +65,7 @@ class StreamProcessor:
             # "window_start": self.window_start,
             "previous_texts_stored": len(self.previous_texts),
         }
+        stats.update(self.stats)
         return stats
 
     def phrase_matches(self, text, phrases):
@@ -142,7 +150,12 @@ class StreamProcessor:
 
                 # Heavy work outside the lock
                 audio_np = np.frombuffer(buffer, np.int16).astype("float32") / 32768.0
-                whisper_result = self.whisper_model.transcribe(audio_np, fp16=False)
+                whisper_result = self.whisper_model.transcribe(
+                    audio_np,
+                    fp16=self.whisper_model.device.type == "cuda",
+                    no_speech_threshold=0.6,
+                    condition_on_previous_text=False,
+                )
                 text = whisper_result.get("text", "").strip()
 
                 t_transcribe = time.time() - t0
@@ -187,6 +200,12 @@ class StreamProcessor:
                             ]
 
                 t_process = time.time() - t0
+                self.stats["t_process"] = t_process
+                if t_process > self.stats["t_max_process"]:
+                    self.stats["t_max_process"] = t_process
+                self.stats["t_transcribe"] = t_transcribe
+                self.stats["t_ai"] = t_ai
+                self.stats["t_match"] = t_match
                 logging.debug(
                     f"{self.radio_conf.get('NAME','UNKNOWN')}: process_time={t_process:.2f}, transcribe_time={t_transcribe:.2f}, ai_time={t_ai:.2f}, match_time={t_match:.2f}, buffer_seconds = {self.buffer_seconds}"
                 )

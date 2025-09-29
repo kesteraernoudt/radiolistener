@@ -54,6 +54,13 @@ def update_radio_conf(name):
     ctrl.restart()
     return jsonify(success=True)
 
+@app.route("/radio/<name>/restart", methods=["POST"])
+def restart_radio(name):
+    ctrl = listener.controller(name)
+    if not ctrl:
+        return jsonify(success=False, error="Radio not found"), 404
+    ctrl.restart()
+    return jsonify(success=True)
 
 @app.route("/radio/logs", defaults={"name": ""})
 @app.route("/radio/<name>/logs")
