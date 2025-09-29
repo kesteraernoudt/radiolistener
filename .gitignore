@@ -6,3 +6,4 @@ logs/
 cmdlinelog.txt
 config/*.pt
 fb_config/
+utils/genai.py

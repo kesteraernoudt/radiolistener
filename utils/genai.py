@@ -17,6 +17,7 @@ class GenAIHandler:
             self._pre_prompt_mtime = os.path.getmtime(self.pre_prompt_file)
             with open(self.pre_prompt_file, "r") as file:
                 self.PRE_PROMPT = file.read()
+            logger.log_ai_event(f"GenAIHandler loaded pre_prompt: {self.PRE_PROMPT}")
 
     def _check_pre_prompt_update(self):
         if self.pre_prompt_file and os.path.exists(self.pre_prompt_file):
@@ -26,7 +27,7 @@ class GenAIHandler:
 
     def generate(self, prompt: str, max_output_tokens: int = 1024) -> str:
         self._check_pre_prompt_update()
-        logger.log_ai_event(self.PRE_PROMPT + prompt)
+        logger.log_ai_event(prompt)
         try:
             response = self.client.models.generate_content(
                 model=self.MODEL,

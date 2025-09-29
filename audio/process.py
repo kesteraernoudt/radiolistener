@@ -6,6 +6,7 @@ from utils import logger, telegram_notifier, genai
 import whisper
 import threading
 import logging
+import queue
 
 
 class StreamProcessor:
@@ -44,12 +45,19 @@ class StreamProcessor:
         self.last_alert_time = 0
         self.do_save_full_clip = 0
         self.lock = threading.Lock()
+        # Single background transcription thread with queues
+        self.transcribe_in = queue.Queue(maxsize=4)
+        self.transcribe_out = queue.Queue()
+        self.transcriber_thread = threading.Thread(target=self._transcriber_loop, daemon=True)
+        self.transcriber_thread.start()
         self.stats = {
-            "t_transcribe": 0,
-            "t_ai": 0,
-            "t_match": 0,
-            "t_process": 0,
-            "t_max_process": 0,
+            "t_transcribe": 0.0,
+            "t_ai": 0.0,
+            "t_match": 0.0,
+            "t_process": 0.0,
+            "t_max_process": 0.0,
+            "t_transcribe_in_len": 0,
+            "t_transcribe_out_len": 0,
         }
 
     def get_stats(self):  # todo, update with processing times
@@ -65,8 +73,9 @@ class StreamProcessor:
             # "window_start": self.window_start,
             "previous_texts_stored": len(self.previous_texts),
         }
-        stats.update(self.stats)
-        return stats
+        # Merge stat dictionaries without mutating types that confuse the linter
+        merged = {**stats, **self.stats}
+        return merged
 
     def phrase_matches(self, text, phrases):
         for phrase in phrases:
@@ -91,12 +100,14 @@ class StreamProcessor:
         print(self.radio_conf["NAME"] + ": " + alert_msg)
         if now - self.last_alert_time > 300:  # MIN_ALERT_INTERVAL
             # telegram_notifier.send_telegram(alert_msg)
-            self.controller.send_message(
-                self.radio_conf["NAME"]
-                + ": "
-                + alert_msg
-                + (f", context: {context}" if context else "")
-            )
+            ctrl = getattr(self, 'controller', None)
+            if ctrl is not None and hasattr(ctrl, 'send_message'):
+                ctrl.send_message(
+                    self.radio_conf["NAME"]
+                    + ": "
+                    + alert_msg
+                    + (f", context: {context}" if context else "")
+                )
             # self.controller.send_sms_message(code_word)
             self.last_alert_time = now
             self.do_save_full_clip = 1
@@ -113,12 +124,14 @@ class StreamProcessor:
             )
         return code_word
 
-    def process_audio(self, queue):
+    def process_audio(self, audio_queue):
         last_match = ""
-        while self.controller.running:
+        while getattr(self, 'controller', None) and getattr(self.controller, 'running', False):
             try:
-                data = queue.popleft()
+                data = audio_queue.popleft()
             except:
+                # Avoid busy-spin when queue is empty; give capture thread time to fill
+                time.sleep(0.01)
                 continue
 
             # add incoming data under lock
@@ -131,13 +144,13 @@ class StreamProcessor:
                     self.window_start = max(0, self.window_start - trim_amount)
 
             # Process as many windows as possible. We grab each frame under lock
-            # but do transcription and heavy work outside the lock.
+            # but do transcription in a single background thread and drain results FIFO.
             while True:
                 with self.lock:
-                    if self.window_start + self.frame_size <= len(self.rolling_buffer):
+                    can_take_frame = self.window_start + self.frame_size <= len(self.rolling_buffer)
+                    if can_take_frame:
                         frame_start = self.window_start
                         frame_end = self.window_start + self.frame_size
-                        # move window_start now to avoid reprocessing while we transcribe
                         self.window_start += self.step_size
                         buffer = self.rolling_buffer[frame_start:frame_end]
                     else:
@@ -145,41 +158,46 @@ class StreamProcessor:
 
                 if buffer is None:
                     break
+                
+                # Try to enqueue for transcription without blocking infinitely
+                try:
+                    self.transcribe_in.put_nowait(buffer)
+                except queue.Full:
+                    # Stop taking more frames this cycle if transcriber is backlogged
+                    break
 
-                t0 = time.time()
+            # Drain all available results FIFO (single worker preserves order)
+            while True:
+                try:
+                    result = self.transcribe_out.get_nowait()
+                except queue.Empty:
+                    break
 
-                # Heavy work outside the lock
-                audio_np = np.frombuffer(buffer, np.int16).astype("float32") / 32768.0
-                whisper_result = self.whisper_model.transcribe(
-                    audio_np,
-                    fp16=self.whisper_model.device.type == "cuda",
-                    no_speech_threshold=0.6,
-                    condition_on_previous_text=False,
-                )
-                text = whisper_result.get("text", "").strip()
+                text = result.get("text", "")
+                t_transcribe = result.get("t_transcribe", 0)
 
-                t_transcribe = time.time() - t0
-
+                t0_post = time.time()
                 t_ai = 0
                 t_match = 0
 
                 if text:
-                    if last_match:  # there was a previous match but no codeword found
+                    if last_match:
                         t_ai_start = time.time()
                         self.handle_match(last_match, text)
                         t_ai_end = time.time()
-                        t_ai = t_ai + t_ai_end - t_ai_start
-                        last_match = ""  # reset last match after using it
+                        t_ai += t_ai_end - t_ai_start
+                        last_match = ""
                     if self.do_save_full_clip:
                         with self.lock:
                             snapshot = bytes(self.rolling_buffer)
                             self.do_save_full_clip = 0
                         last_clip_path = clip_saver.save_clip(snapshot)
-                        self.controller.send_audio(last_clip_path, caption="")
+                        ctrl = getattr(self, 'controller', None)
+                        if ctrl is not None and hasattr(ctrl, 'send_audio'):
+                            ctrl.send_audio(last_clip_path, caption="")
 
-                    logger.log_event(self.radio_conf["NAME"], text)
+                    logger.log_event(self.radio_conf.get("NAME", "UNKNOWN"), text)
 
-                    # determine matches and update previous_texts under lock
                     t_match_start = time.time()
                     matches = self.phrase_matches(text, self.radio_conf["PHRASES"])
                     t_match_end = time.time()
@@ -188,24 +206,48 @@ class StreamProcessor:
                         t_ai_start = time.time()
                         code_word = self.handle_match(matches, text)
                         t_ai_end = time.time()
-                        t_ai = t_ai + t_ai_end - t_ai_start
-                        if not code_word:  # no codeword found, save for next round
+                        t_ai += t_ai_end - t_ai_start
+                        if not code_word:
                             last_match = matches
 
                     with self.lock:
                         self.previous_texts.append(text)
                         if len(self.previous_texts) > self.MAX_MSG_STORAGE:
-                            self.previous_texts = self.previous_texts[
-                                -self.MAX_MSG_STORAGE :
-                            ]
+                            self.previous_texts = self.previous_texts[-self.MAX_MSG_STORAGE :]
 
-                t_process = time.time() - t0
+                t_process = time.time() - t0_post + t_transcribe
                 self.stats["t_process"] = t_process
                 if t_process > self.stats["t_max_process"]:
                     self.stats["t_max_process"] = t_process
                 self.stats["t_transcribe"] = t_transcribe
                 self.stats["t_ai"] = t_ai
                 self.stats["t_match"] = t_match
+                self.stats["t_transcribe_in_len"] = self.transcribe_in.qsize()
+                self.stats["t_transcribe_out_len"] = self.transcribe_out.qsize()
                 logging.debug(
                     f"{self.radio_conf.get('NAME','UNKNOWN')}: process_time={t_process:.2f}, transcribe_time={t_transcribe:.2f}, ai_time={t_ai:.2f}, match_time={t_match:.2f}, buffer_seconds = {self.buffer_seconds}"
                 )
+
+    def _transcriber_loop(self):
+        while getattr(self, 'controller', None) and getattr(self.controller, 'running', False):
+            try:
+                buffer_bytes = self.transcribe_in.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            try:
+                t0 = time.time()
+                audio_np = np.frombuffer(buffer_bytes, np.int16).astype("float32") / 32768.0
+                whisper_result = self.whisper_model.transcribe(
+                    audio_np,
+                    fp16=self.whisper_model.device.type == "cuda",
+                    no_speech_threshold=0.6,
+                    condition_on_previous_text=False,
+                )
+                # Ensure we treat text as a string
+                text_val = whisper_result.get("text", "")
+                text = str(text_val).strip() if not isinstance(text_val, str) else text_val.strip()
+                t_transcribe = time.time() - t0
+                self.transcribe_out.put({"text": text, "t_transcribe": t_transcribe})
+            except Exception as e:
+                logging.exception(f"Transcriber loop error: {e}")
+                self.transcribe_out.put({"text": "", "t_transcribe": 0})
