@@ -56,9 +56,24 @@ class StreamProcessor:
             "t_match": 0.0,
             "t_process": 0.0,
             "t_max_process": 0.0,
+            "t_max_ai": 0.0,
+            "avg_transcribe": 0.0,
+            "avg_ai": 0.0,
+            "avg_match": 0.0,
+            "avg_process": 0.0,
+            "n_events": 0,
+            "n_ai_events": 0,
             "t_transcribe_in_len": 0,
             "t_transcribe_out_len": 0,
         }
+
+        # Internal accumulators for averages
+        self._sum_transcribe = 0.0
+        self._sum_ai = 0.0
+        self._sum_match = 0.0
+        self._sum_process = 0.0
+        self._count_events = 0
+        self._count_ai_events = 0
 
     def get_stats(self):  # todo, update with processing times
         stats = {
@@ -221,9 +236,36 @@ class StreamProcessor:
                     self.stats["t_max_process"] = t_process
                 self.stats["t_transcribe"] = t_transcribe
                 self.stats["t_ai"] = t_ai
+                if t_ai > self.stats["t_max_ai"]:
+                    self.stats["t_max_ai"] = t_ai
                 self.stats["t_match"] = t_match
                 self.stats["t_transcribe_in_len"] = self.transcribe_in.qsize()
                 self.stats["t_transcribe_out_len"] = self.transcribe_out.qsize()
+
+                # Update rolling sums and averages
+                self._count_events += 1
+                self._sum_transcribe += t_transcribe
+                self._sum_match += t_match
+                self._sum_process += t_process
+                self.stats["n_events"] = self._count_events
+                self.stats["avg_transcribe"] = (
+                    self._sum_transcribe / self._count_events if self._count_events else 0.0
+                )
+                self.stats["avg_match"] = (
+                    self._sum_match / self._count_events if self._count_events else 0.0
+                )
+                self.stats["avg_process"] = (
+                    self._sum_process / self._count_events if self._count_events else 0.0
+                )
+
+                # Update AI-only averages and counters only when AI work occurred
+                if t_ai > 0:
+                    self._sum_ai += t_ai
+                    self._count_ai_events += 1
+                    self.stats["n_ai_events"] = self._count_ai_events
+                    self.stats["avg_ai"] = (
+                        self._sum_ai / self._count_ai_events if self._count_ai_events else 0.0
+                    )
                 logging.debug(
                     f"{self.radio_conf.get('NAME','UNKNOWN')}: process_time={t_process:.2f}, transcribe_time={t_transcribe:.2f}, ai_time={t_ai:.2f}, match_time={t_match:.2f}, buffer_seconds = {self.buffer_seconds}"
                 )

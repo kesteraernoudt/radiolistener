@@ -162,14 +162,18 @@ class TelegramBot():
         arg = 0
         if len(context.args) > arg:
             radio = context.args[arg]
-
-        controller = self.radioListener.controller(radio)
-        if controller is None or controller.processor is None:
-            await update.message.reply_text(f"No such radio station found ({radio}) or processor not initialized.")
-            return
-
-        stats = controller.get_stats()
-        await update.message.reply_text(json.dumps(stats, indent=2))
+        if radio:
+            controller = self.radioListener.controller(radio)
+            if controller is None or controller.processor is None:
+                await update.message.reply_text(f"No such radio station found ({radio}) or processor not initialized.")
+                return
+            stats = controller.get_stats()
+            await update.message.reply_text(f"{controller.RADIO_CONF.get('NAME','UNKNOWN')}:\n{json.dumps(stats, indent=2)}")
+        else:
+            stats = {}
+            for controller in self.radioListener.controllers.values():
+                stats[controller.RADIO_CONF.get('NAME','UNKNOWN')] = controller.get_stats()
+            await update.message.reply_text(json.dumps(stats, indent=2))
 
     def send_message(self, text):
         if self.app is None:
