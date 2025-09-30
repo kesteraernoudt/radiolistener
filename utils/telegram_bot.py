@@ -1,4 +1,5 @@
 import asyncio
+import json
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from utils import logger
@@ -23,7 +24,8 @@ class TelegramBot():
         self.app.add_handler(CommandHandler(['restart','r'], self.restart_command))
         self.app.add_handler(CallbackQueryHandler(self.button))
         self.app.add_handler(CommandHandler(['clip','c'], self.clip_command))
-        self.app.run_polling()
+        self.app.add_handler(CommandHandler(['stats','s'], self.stats_command))
+        self.app.run_polling(drop_pending_updates=True)
 
     async def start_command(self, update, context):
         await update.message.reply_text('Hello! I am your bot.')
@@ -152,6 +154,22 @@ class TelegramBot():
                 await update.message.reply_audio(audio=af, caption=f"Saved clip from {controller.RADIO_CONF.get('NAME','UNKNOWN')}")
         except Exception as e:
             await update.message.reply_text(f"Clip saved to {filename} but failed to send audio: {e}")
+
+    async def stats_command(self, update, context):
+        """Dump stats
+        """
+        radio = ""
+        arg = 0
+        if len(context.args) > arg:
+            radio = context.args[arg]
+
+        controller = self.radioListener.controller(radio)
+        if controller is None or controller.processor is None:
+            await update.message.reply_text(f"No such radio station found ({radio}) or processor not initialized.")
+            return
+
+        stats = controller.get_stats()
+        await update.message.reply_text(json.dumps(stats, indent=2))
 
     def send_message(self, text):
         if self.app is None:

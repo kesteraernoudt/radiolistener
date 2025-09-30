@@ -15,7 +15,7 @@ def log_event(radio, msg):
     transcript_log[radio.upper()].append(line)
     if len(transcript_log[radio.upper()]) > MAX_TRANSCRIPT_LINES:
         transcript_log[radio.upper()] = transcript_log[radio.upper()][-MAX_TRANSCRIPT_LINES:]
-    logfile = os.path.join(LOG_DIR, f"{datetime.now().date()}.log")
+    logfile = os.path.join(LOG_DIR, f"{datetime.now().date()}-{radio}.log")
     with open(logfile, "a") as f:
         f.write(line + "\n")
     return line
