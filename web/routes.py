@@ -85,3 +85,22 @@ def get_radio_stats(name):
         return jsonify(success=False, error="Radio not found"), 404
     stats = ctrl.get_stats()
     return jsonify(stats=stats)
+
+@app.route("/radio/<name>/stats/realtime")
+def get_realtime_stats(name):
+    """Get real-time stats for dashboard visualizations"""
+    ctrl = listener.controller(name)
+    if not ctrl:
+        return jsonify(success=False, error="Radio not found"), 404
+    
+    stats = ctrl.get_stats()
+    import time
+    
+    # Add timestamp for real-time updates
+    stats_with_timestamp = {
+        **stats,
+        "timestamp": time.time(),
+        "timestamp_readable": time.strftime("%H:%M:%S")
+    }
+    
+    return jsonify(stats=stats_with_timestamp)
