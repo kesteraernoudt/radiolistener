@@ -128,14 +128,14 @@ class StreamProcessor:
             self.do_save_full_clip = 1
 
     def handle_match(self, match, text):
-        context = f"{self.previous_texts[-1] if self.previous_texts else ''} {text}"
+        context = f"{self.previous_texts[-self.CONTEXT_LEN] if self.previous_texts and len(self.previous_texts) > self.CONTEXT_LEN else ''} {text}"
         code_word = self.genAIHandler.generate(context)
         if code_word:
             self.send_alert(match, code_word, context)
         else:
             logger.log_event(
                 self.radio_conf["NAME"],
-                f"No code word found for match: {match}, text was: {self.previous_texts[-1] if self.previous_texts else ''} {text}",
+                f"No code word found for match: {match}, text was: {context} {text}",
             )
         return code_word
 

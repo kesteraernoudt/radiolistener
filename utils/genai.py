@@ -25,7 +25,7 @@ class GenAIHandler:
             if mtime != self._pre_prompt_mtime:
                 self._load_pre_prompt()
 
-    def generate(self, prompt: str, max_output_tokens: int = 1024) -> str:
+    def generate(self, prompt: str, max_output_tokens: int = 1024) -> str | None:
         self._check_pre_prompt_update()
         logger.log_ai_event(prompt)
         try:
@@ -38,7 +38,7 @@ class GenAIHandler:
         except Exception as e:
             print(f"GenAIHandler generate error: {e}")
             logger.log_ai_event(f"GenAIHandler generate error: {e}")
-            return ""
+            return None
         
 if __name__ == "__main__":
     genai_handler = GenAIHandler(api_key="MY_API_KEY")
