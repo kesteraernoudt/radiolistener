@@ -176,10 +176,12 @@
           </div>
 
           <!-- Queue Health Gauge -->
+          <!-- 
           <div class="chart-container">
             <h4>Transcription Queue Health</h4>
             <canvas id="queue-gauge-{{ radio.name }}" width="200" height="200"></canvas>
           </div>
+          -->
 
           <!-- AI Activity Heatmap -->
           <div class="chart-container">
@@ -277,7 +279,7 @@
 
       // Initialize charts
       initTimelineChart(radioName);
-      initQueueGauge(radioName);
+      //initQueueGauge(radioName);
       initAIHeatmap(radioName);
     }
 
@@ -346,6 +348,7 @@
     }
 
     // Queue Health Gauge
+    /*
     function initQueueGauge(radioName) {
       const ctx = document.getElementById(`queue-gauge-${radioName}`).getContext('2d');
       dashboardData[radioName].queueGauge = new Chart(ctx, {
@@ -368,6 +371,7 @@
         }
       });
     }
+    */
 
     // AI Activity Heatmap
     function initAIHeatmap(radioName) {
@@ -438,6 +442,7 @@
       data.timelineChart.update();
 
       // Update queue gauge
+      /*
       const queueUsage = stats.t_transcribe_in_len || 0;
       const queueMax = 4; // Based on queue maxsize
       const queuePercent = Math.min((queueUsage / queueMax) * 100, 100);
@@ -448,6 +453,7 @@
         '#e5e7eb'
       ];
       data.queueGauge.update();
+      */
 
       // Update AI heatmap
       if (stats.t_ai > 0) {
@@ -465,14 +471,18 @@
       // Update processing rate counter
       const currentTime = Date.now();
       const timeDiff = (currentTime - data.lastTimestamp) / 1000 / 60; // minutes
-      const eventDiff = stats.n_events - data.lastEventCount;
-      const rate = timeDiff > 0 ? eventDiff / timeDiff : 0;
+      // only update every 30 seconds
+      if (currentTime - data.lastTimestamp > 30000) {
+        const eventDiff = stats.n_events - data.lastEventCount;
+        const rate = timeDiff > 0 ? eventDiff / timeDiff : 0;
 
-      document.querySelector(`#rate-counter-${radioName} .rate-number`).textContent =
-        Math.round(rate * 10) / 10;
+        escapedRadioName = radioName.replace(/\./g, "\\.");
+        document.querySelector(`#rate-counter-${escapedRadioName} .rate-number`).textContent =
+          Math.round(rate * 10) / 10;
 
-      data.lastEventCount = stats.n_events;
-      data.lastTimestamp = currentTime;
+        data.lastEventCount = stats.n_events;
+        data.lastTimestamp = currentTime;
+      }
 
       // Update rolling averages
       document.getElementById(`avg-transcribe-${radioName}`).textContent =

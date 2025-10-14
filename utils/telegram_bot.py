@@ -18,6 +18,7 @@ class TelegramBot():
         self.loop = asyncio.get_event_loop()
         self.app.add_handler(CommandHandler('start', self.start_command))
         self.app.add_handler(CommandHandler(['log','l'], self.log_command))
+        self.app.add_handler(CommandHandler(['ailog','ail'], self.ailog_command))
         self.app.add_handler(CommandHandler(['text','t'], self.text_command))
         self.app.add_handler(CommandHandler(['ai','a'], self.ai_command))
         self.app.add_handler(CommandHandler(['radios','radio'], self.radios_command))
@@ -25,7 +26,21 @@ class TelegramBot():
         self.app.add_handler(CallbackQueryHandler(self.button))
         self.app.add_handler(CommandHandler(['clip','c'], self.clip_command))
         self.app.add_handler(CommandHandler(['stats','s'], self.stats_command))
+        self.app.add_handler(CommandHandler(['listcommands', 'list'], self.list_commands))
         self.app.run_polling(drop_pending_updates=True)
+
+    async def list_commands(self, update, context):
+        commands_list = []
+        # Access handlers in the dispatcher
+        for handler_group in context.application.handlers.values():
+            for handler in handler_group:
+                if isinstance(handler, CommandHandler):
+                    commands_list.extend(handler.commands)
+
+        if commands_list:
+            await update.message.reply_text(f"Supported commands: {', '.join(['/' + cmd for cmd in commands_list])}")
+        else:
+            await update.message.reply_text("No commands defined.")
 
     async def start_command(self, update, context):
         await update.message.reply_text('Hello! I am your bot.')
@@ -40,6 +55,19 @@ class TelegramBot():
         if len(context.args) > arg:
             radio = context.args[arg]
         msg = "\n".join(logger.get_radio_log(radio, num_lines))
+        if msg:
+            await update.message.reply_text(msg)
+
+    async def ailog_command(self, update, context):
+        num_lines = 10
+        radio = ""
+        arg = 0
+        if len(context.args) > arg and context.args[arg].isdigit():
+            num_lines = int(context.args[arg])
+            arg += 1
+        if len(context.args) > arg:
+            radio = context.args[arg]
+        msg = "\n".join(logger.get_radio_ai_log(radio, num_lines))
         if msg:
             await update.message.reply_text(msg)
 

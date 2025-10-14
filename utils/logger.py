@@ -6,10 +6,13 @@ LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
 MAX_TRANSCRIPT_LINES = 1000
+MAX_AI_LINES = 1000
 
 transcript_log = defaultdict(list)
+ai_log = list()
 
 def log_event(radio, msg):
+    global transcript_log
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts} - {radio}] {msg}"
     transcript_log[radio.upper()].append(line)
@@ -21,8 +24,12 @@ def log_event(radio, msg):
     return line
 
 def log_ai_event(msg):
+    global ai_log
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
+    ai_log.append(line)
+    if len(ai_log) > MAX_AI_LINES:
+        ai_log = ai_log[-MAX_AI_LINES:]
     logfile = os.path.join(LOG_DIR, f"{datetime.now().date()}_ai.log")
     with open(logfile, "a") as f:
         f.write(line + "\n")
@@ -38,6 +45,7 @@ def cleanup_logs(days=7):
                 os.remove(path)
 
 def get_radio_log(radio="", num_lines=100):
+    global transcript_log
     if not radio:
         # return combined log
         combined = []
@@ -52,3 +60,14 @@ def get_radio_log(radio="", num_lines=100):
         if name.startswith(radio.upper()):
             return log[-num_lines:]
     return []
+
+def get_radio_ai_log(radio="", num_lines=100):
+    global ai_log
+    if radio:
+        log = []
+        for lines in ai_log:
+            if radio.upper() in lines.upper():
+                log.extend(lines)
+        log = sorted(log, reverse=True)[:num_lines]
+        return log
+    return ai_log[-num_lines:]
