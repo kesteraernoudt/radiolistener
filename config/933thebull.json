@@ -1,0 +1,24 @@
+{
+  "NAME": "933TheBull",
+  "PHRASES": [
+    {
+      "mode": "regex",
+      "text": "text (now|immediately)"
+    },
+    {
+      "mode": "contains",
+      "text": "disney"
+    },
+    {
+      "mode": "contains",
+      "text": "code word"
+    },
+    {
+      "mode": "contains",
+      "text": "great America"
+    }
+  ],
+  "SMS_NUMBER": "+1801-505-9393",
+  "STREAM_URL": "https://25063.live.streamtheworld.com/KUBLFMAAC.aac",
+  "URL": "https://www.933thebull.com/win/disney/"
+}
