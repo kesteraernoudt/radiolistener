@@ -71,3 +71,82 @@ def get_radio_ai_log(radio="", num_lines=100):
         log = sorted(log, reverse=True)[:num_lines]
         return log
     return ai_log[-num_lines:]
+
+def search_radio_log(radio="", keyword="", max_results=50):
+    """
+    Search through log files for a specific keyword or phrase.
+    
+    Args:
+        radio: Radio station name (empty string for all radios)
+        keyword: Keyword or phrase to search for (case-insensitive)
+        max_results: Maximum number of results to return
+    
+    Returns:
+        List of matching log lines, sorted by date (most recent first)
+    """
+    if not keyword:
+        return []
+    
+    keyword_lower = keyword.lower()
+    results = []
+    
+    # Search in-memory logs first
+    global transcript_log
+    if radio:
+        radios_to_search = [r for r in transcript_log.keys() if r.startswith(radio.upper())]
+    else:
+        radios_to_search = list(transcript_log.keys())
+    
+    for radio_name in radios_to_search:
+        for line in transcript_log[radio_name]:
+            if keyword_lower in line.lower():
+                results.append(line)
+    
+    # Search log files on disk
+    if os.path.exists(LOG_DIR):
+        for filename in sorted(os.listdir(LOG_DIR), reverse=True):
+            if not filename.endswith('.log') or filename.endswith('_ai.log'):
+                continue
+            
+            # Extract radio name from filename (format: YYYY-MM-DD-{radio}.log)
+            if '-' in filename:
+                parts = filename.rsplit('-', 1)
+                if len(parts) == 2:
+                    file_radio = parts[1].replace('.log', '').upper()
+                    # Skip if radio specified and doesn't match
+                    if radio and not file_radio.startswith(radio.upper()):
+                        continue
+                elif radio:
+                    # If filename doesn't match expected format and radio is specified, skip
+                    continue
+            elif radio:
+                continue
+            
+            filepath = os.path.join(LOG_DIR, filename)
+            try:
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and keyword_lower in line.lower():
+                            results.append(line)
+            except (IOError, OSError):
+                continue
+            
+            # Stop if we have enough results
+            if len(results) >= max_results:
+                break
+    
+    # Sort by timestamp (most recent first) and limit results
+    # Log lines have format: [YYYY-MM-DD HH:MM:SS - RADIO] message
+    def extract_timestamp(line):
+        try:
+            # Extract date/time from [YYYY-MM-DD HH:MM:SS format
+            if '[' in line and ']' in line:
+                timestamp_str = line.split('[')[1].split(']')[0].split(' - ')[0]
+                return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, IndexError):
+            pass
+        return datetime.min
+    
+    results.sort(key=extract_timestamp, reverse=True)
+    return results[:max_results]

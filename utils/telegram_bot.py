@@ -27,6 +27,8 @@ class TelegramBot():
         self.app.add_handler(CommandHandler(['clip','c'], self.clip_command))
         self.app.add_handler(CommandHandler(['stats','s'], self.stats_command))
         self.app.add_handler(CommandHandler(['listcommands', 'list'], self.list_commands))
+        self.app.add_handler(CommandHandler(['words', 'w'], self.list_codewords))
+        self.app.add_handler(CommandHandler(['search', 'find', 'f'], self.search_command))
         self.app.run_polling(drop_pending_updates=True)
 
     async def list_commands(self, update, context):
@@ -54,9 +56,26 @@ class TelegramBot():
             arg += 1
         if len(context.args) > arg:
             radio = context.args[arg]
-        msg = "\n".join(logger.get_radio_log(radio, num_lines))
-        if msg:
-            await update.message.reply_text(msg)
+        log_lines = logger.get_radio_log(radio, num_lines)
+        if not log_lines:
+            await update.message.reply_text("No logs found.")
+            return
+        
+        # Format results - Telegram has a 4096 character limit per message
+        msg_lines = []
+        for line in log_lines:
+            msg_lines.append(line)
+            # Check message length (leave some buffer)
+            msg = "\n".join(msg_lines)
+            if len(msg) > 4000:
+                # Send current batch and continue with remaining results
+                msg_lines.pop()  # Remove the line that would exceed limit
+                await update.message.reply_text("\n".join(msg_lines))
+                msg_lines = [line]  # Start new message with the line we removed
+        
+        # Send remaining results
+        if msg_lines:
+            await update.message.reply_text("\n".join(msg_lines))
 
     async def ailog_command(self, update, context):
         num_lines = 10
@@ -67,9 +86,26 @@ class TelegramBot():
             arg += 1
         if len(context.args) > arg:
             radio = context.args[arg]
-        msg = "\n".join(logger.get_radio_ai_log(radio, num_lines))
-        if msg:
-            await update.message.reply_text(msg)
+        log_lines = logger.get_radio_ai_log(radio, num_lines)
+        if not log_lines:
+            await update.message.reply_text("No AI logs found.")
+            return
+        
+        # Format results - Telegram has a 4096 character limit per message
+        msg_lines = []
+        for line in log_lines:
+            msg_lines.append(line)
+            # Check message length (leave some buffer)
+            msg = "\n".join(msg_lines)
+            if len(msg) > 4000:
+                # Send current batch and continue with remaining results
+                msg_lines.pop()  # Remove the line that would exceed limit
+                await update.message.reply_text("\n".join(msg_lines))
+                msg_lines = [line]  # Start new message with the line we removed
+        
+        # Send remaining results
+        if msg_lines:
+            await update.message.reply_text("\n".join(msg_lines))
 
     async def radios_command(self, update, context):
         radios = "\n".join(self.radioListener.controllers.keys())
@@ -100,9 +136,119 @@ class TelegramBot():
         if controller is None or controller.processor is None:
             await update.message.reply_text(f"No such radio station found ({radio}) or processor not initialized.")
             return
-        msg = "\n".join(controller.processor.previous_texts[-num_lines:])
+        text_lines = controller.processor.previous_texts[-num_lines:]
+        if not text_lines:
+            await update.message.reply_text("No text found.")
+            return
+        
+        # Format results - Telegram has a 4096 character limit per message
+        msg_lines = []
+        for line in text_lines:
+            msg_lines.append(line)
+            # Check message length (leave some buffer)
+            msg = "\n".join(msg_lines)
+            if len(msg) > 4000:
+                # Send current batch and continue with remaining results
+                msg_lines.pop()  # Remove the line that would exceed limit
+                await update.message.reply_text("\n".join(msg_lines))
+                msg_lines = [line]  # Start new message with the line we removed
+        
+        # Send remaining results
+        if msg_lines:
+            await update.message.reply_text("\n".join(msg_lines))
+
+    async def list_codewords(self, update, context):
+        num_lines = 10
+        radio = ""
+        arg = 0
+        if len(context.args) > arg and context.args[arg].isdigit():
+            num_lines = int(context.args[arg])
+            arg += 1
+        if len(context.args) > arg:
+            radio = context.args[arg]
+        controller = self.radioListener.controller(radio)
+        if controller is None or controller.processor is None:
+            await update.message.reply_text(f"No such radio station found ({radio}) or processor not initialized.")
+            return
+        msg = "\n".join(controller.processor.previous_codewords[-num_lines:])
         if msg:
             await update.message.reply_text(msg)
+
+    async def search_command(self, update, context):
+        """Search logs for a keyword or phrase.
+        
+        Usage:
+        /search keyword              -> search all radios for keyword
+        /search keyword radio        -> search specific radio for keyword
+        /search 50 keyword radio     -> search with max 50 results for specific radio
+        """
+        if not context.args:
+            await update.message.reply_text("Usage: /search [max_results] <keyword> [radio]\nExample: /search emergency Mix106.5")
+            return
+        
+        max_results = 50
+        radio = ""
+        keyword = ""
+        arg = 0
+        
+        # Parse first arg as number if present
+        if len(context.args) > arg and context.args[arg].isdigit():
+            max_results = int(context.args[arg])
+            arg += 1
+        
+        # The keyword is everything after the optional number, except the last arg if it matches a radio name
+        # If only one word remains, it's always the keyword (even if it matches a radio name)
+        if len(context.args) > arg:
+            if len(context.args) == arg + 1:
+                # Only one word remaining - it's the keyword
+                keyword = context.args[arg]
+            else:
+                # Multiple words - check if last arg matches a radio name
+                last_arg = context.args[-1]
+                matching_radio = None
+                for radio_name in self.radioListener.controllers.keys():
+                    if radio_name.startswith(last_arg.upper()):
+                        matching_radio = last_arg
+                        break
+                
+                if matching_radio:
+                    # Last arg is a radio name, everything before it is the keyword
+                    radio = matching_radio
+                    keyword = " ".join(context.args[arg:-1])
+                else:
+                    # No radio specified, everything after optional number is the keyword
+                    keyword = " ".join(context.args[arg:])
+        
+        if not keyword:
+            await update.message.reply_text("Please provide a keyword to search for.\nUsage: /search [max_results] <keyword> [radio]")
+            return
+        
+        # Search the logs
+        results = logger.search_radio_log(radio=radio, keyword=keyword, max_results=max_results)
+        
+        if not results:
+            radio_msg = f" for {radio}" if radio else ""
+            await update.message.reply_text(f"No matches found for '{keyword}'{radio_msg}")
+            return
+        
+        # Format results - Telegram has a 4096 character limit per message
+        msg_lines = []
+        for line in results:
+            msg_lines.append(line)
+            # Check message length (leave some buffer)
+            msg = "\n".join(msg_lines)
+            if len(msg) > 4000:
+                # Send current batch and continue with remaining results
+                msg_lines.pop()  # Remove the line that would exceed limit
+                await update.message.reply_text("\n".join(msg_lines))
+                msg_lines = [line]  # Start new message with the line we removed
+        
+        # Send remaining results
+        if msg_lines:
+            final_msg = "\n".join(msg_lines)
+            if len(results) >= max_results:
+                final_msg += f"\n\n(Showing first {max_results} results)"
+            await update.message.reply_text(final_msg)
 
     async def ai_command(self, update, context):
         num_lines = 3
