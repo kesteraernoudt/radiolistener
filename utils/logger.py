@@ -45,32 +45,140 @@ def cleanup_logs(days=7):
                 os.remove(path)
 
 def get_radio_log(radio="", num_lines=100):
+    """
+    Get radio log entries from both in-memory logs and log files.
+    Deduplicates entries to avoid showing the same line twice.
+    """
     global transcript_log
+    all_lines = []
+    seen_lines = set()  # Track seen lines to avoid duplicates
+    
+    # Helper function to extract timestamp for sorting
+    def extract_timestamp(line):
+        try:
+            if '[' in line and ']' in line:
+                timestamp_str = line.split('[')[1].split(']')[0].split(' - ')[0]
+                return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, IndexError):
+            pass
+        return datetime.min
+    
+    # Read from log files first (oldest to newest)
+    if os.path.exists(LOG_DIR):
+        file_lines = []
+        for filename in sorted(os.listdir(LOG_DIR)):
+            if not filename.endswith('.log') or filename.endswith('_ai.log'):
+                continue
+            
+            # Extract radio name from filename (format: YYYY-MM-DD-{radio}.log)
+            if '-' in filename:
+                parts = filename.rsplit('-', 1)
+                if len(parts) == 2:
+                    file_radio = parts[1].replace('.log', '').upper()
+                    # Skip if radio specified and doesn't match
+                    if radio and not file_radio.startswith(radio.upper()):
+                        continue
+                elif radio:
+                    continue
+            elif radio:
+                continue
+            
+            filepath = os.path.join(LOG_DIR, filename)
+            try:
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and line not in seen_lines:
+                            seen_lines.add(line)
+                            file_lines.append(line)
+            except (IOError, OSError):
+                continue
+        
+        all_lines.extend(file_lines)
+    
+    # Add in-memory logs (these are the most recent, may overlap with latest log file)
     if not radio:
-        # return combined log
-        combined = []
+        # return combined log from all radios
         for lines in transcript_log.values():
-            combined.extend(lines)
-        combined = sorted(combined, reverse=True)[:num_lines]
-        return combined
-    if radio.upper() in transcript_log:
-        return transcript_log[radio.upper()][-num_lines:]
-    # see if it's the beginning of a radio name
-    for name, log in transcript_log.items():
-        if name.startswith(radio.upper()):
-            return log[-num_lines:]
-    return []
+            for line in lines:
+                if line not in seen_lines:
+                    seen_lines.add(line)
+                    all_lines.append(line)
+    else:
+        # Find matching radio(s)
+        matching_radios = []
+        if radio.upper() in transcript_log:
+            matching_radios.append(radio.upper())
+        else:
+            # see if it's the beginning of a radio name
+            for name in transcript_log.keys():
+                if name.startswith(radio.upper()):
+                    matching_radios.append(name)
+        
+        for radio_name in matching_radios:
+            for line in transcript_log[radio_name]:
+                if line not in seen_lines:
+                    seen_lines.add(line)
+                    all_lines.append(line)
+    
+    # Sort by timestamp (most recent first) and limit
+    all_lines.sort(key=extract_timestamp, reverse=True)
+    return all_lines[:num_lines]
 
 def get_radio_ai_log(radio="", num_lines=100):
+    """
+    Get AI log entries from both in-memory logs and log files.
+    Deduplicates entries to avoid showing the same line twice.
+    """
     global ai_log
-    if radio:
-        log = []
-        for lines in ai_log:
-            if radio.upper() in lines.upper():
-                log.extend(lines)
-        log = sorted(log, reverse=True)[:num_lines]
-        return log
-    return ai_log[-num_lines:]
+    all_lines = []
+    seen_lines = set()  # Track seen lines to avoid duplicates
+    
+    # Helper function to extract timestamp for sorting
+    def extract_timestamp(line):
+        try:
+            if '[' in line and ']' in line:
+                timestamp_str = line.split('[')[1].split(']')[0]
+                return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, IndexError):
+            pass
+        return datetime.min
+    
+    # Read from AI log files first (oldest to newest)
+    if os.path.exists(LOG_DIR):
+        file_lines = []
+        for filename in sorted(os.listdir(LOG_DIR)):
+            if not filename.endswith('_ai.log'):
+                continue
+            
+            filepath = os.path.join(LOG_DIR, filename)
+            try:
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            # Filter by radio if specified
+                            if radio and radio.upper() not in line.upper():
+                                continue
+                            if line not in seen_lines:
+                                seen_lines.add(line)
+                                file_lines.append(line)
+            except (IOError, OSError):
+                continue
+        
+        all_lines.extend(file_lines)
+    
+    # Add in-memory AI logs (these are the most recent, may overlap with latest log file)
+    for line in ai_log:
+        if radio and radio.upper() not in line.upper():
+            continue
+        if line not in seen_lines:
+            seen_lines.add(line)
+            all_lines.append(line)
+    
+    # Sort by timestamp (most recent first) and limit
+    all_lines.sort(key=extract_timestamp, reverse=True)
+    return all_lines[:num_lines]
 
 def search_radio_log(radio="", keyword="", max_results=50):
     """
@@ -136,8 +244,7 @@ def search_radio_log(radio="", keyword="", max_results=50):
             if len(results) >= max_results:
                 break
     
-    # Sort by timestamp (most recent first) and limit results
-    # Log lines have format: [YYYY-MM-DD HH:MM:SS - RADIO] message
+    # Helper function to extract timestamp for sorting
     def extract_timestamp(line):
         try:
             # Extract date/time from [YYYY-MM-DD HH:MM:SS format
@@ -148,5 +255,14 @@ def search_radio_log(radio="", keyword="", max_results=50):
             pass
         return datetime.min
     
-    results.sort(key=extract_timestamp, reverse=True)
-    return results[:max_results]
+    # Deduplicate results - in-memory logs overlap with latest log file entries
+    unique_results = []
+    seen_lines = set()
+    for line in results:
+        if line not in seen_lines:
+            seen_lines.add(line)
+            unique_results.append(line)
+    
+    # Sort by timestamp (most recent first) and limit results
+    unique_results.sort(key=extract_timestamp, reverse=True)
+    return unique_results[:max_results]
