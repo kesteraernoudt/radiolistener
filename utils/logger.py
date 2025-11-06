@@ -44,16 +44,21 @@ def cleanup_logs(days=7):
             if mtime < cutoff:
                 os.remove(path)
 
-def get_radio_log(radio="", num_lines=100):
+def get_radio_log(radio="", num_lines=100, start_datetime=None):
     """
     Get radio log entries from both in-memory logs and log files.
     Deduplicates entries to avoid showing the same line twice.
+    
+    Args:
+        radio: Radio station name (empty string for all radios)
+        num_lines: Maximum number of lines to return
+        start_datetime: Optional datetime object - only return entries >= this datetime
     """
     global transcript_log
     all_lines = []
     seen_lines = set()  # Track seen lines to avoid duplicates
     
-    # Helper function to extract timestamp for sorting
+    # Helper function to extract timestamp for sorting and filtering
     def extract_timestamp(line):
         try:
             if '[' in line and ']' in line:
@@ -62,6 +67,13 @@ def get_radio_log(radio="", num_lines=100):
         except (ValueError, IndexError):
             pass
         return datetime.min
+    
+    def should_include(line):
+        """Check if line should be included based on start_datetime"""
+        if start_datetime is None:
+            return True
+        line_timestamp = extract_timestamp(line)
+        return line_timestamp >= start_datetime
     
     # Read from log files first (oldest to newest)
     if os.path.exists(LOG_DIR):
@@ -88,7 +100,7 @@ def get_radio_log(radio="", num_lines=100):
                 with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                     for line in f:
                         line = line.strip()
-                        if line and line not in seen_lines:
+                        if line and line not in seen_lines and should_include(line):
                             seen_lines.add(line)
                             file_lines.append(line)
             except (IOError, OSError):
@@ -101,7 +113,7 @@ def get_radio_log(radio="", num_lines=100):
         # return combined log from all radios
         for lines in transcript_log.values():
             for line in lines:
-                if line not in seen_lines:
+                if line not in seen_lines and should_include(line):
                     seen_lines.add(line)
                     all_lines.append(line)
     else:
@@ -117,24 +129,41 @@ def get_radio_log(radio="", num_lines=100):
         
         for radio_name in matching_radios:
             for line in transcript_log[radio_name]:
-                if line not in seen_lines:
+                if line not in seen_lines and should_include(line):
                     seen_lines.add(line)
                     all_lines.append(line)
     
-    # Sort by timestamp (most recent first) and limit
-    all_lines.sort(key=extract_timestamp, reverse=True)
-    return all_lines[:num_lines]
+    # Sort by timestamp
+    # If start_datetime is provided, we want entries right after the timestamp (chronological order)
+    # Otherwise, we want the most recent entries (reverse chronological order)
+    if start_datetime is not None:
+        # Sort chronologically (oldest first) to get entries right after the timestamp
+        all_lines.sort(key=extract_timestamp, reverse=False)
+        # Take the first num_lines entries (right after the timestamp)
+        result = all_lines[:num_lines]
+        # Reverse for display (most recent last)
+        result.reverse()
+        return result
+    else:
+        # Sort reverse (most recent first) and limit
+        all_lines.sort(key=extract_timestamp, reverse=True)
+        return all_lines[:num_lines]
 
-def get_radio_ai_log(radio="", num_lines=100):
+def get_radio_ai_log(radio="", num_lines=100, start_datetime=None):
     """
     Get AI log entries from both in-memory logs and log files.
     Deduplicates entries to avoid showing the same line twice.
+    
+    Args:
+        radio: Radio station name (empty string for all radios)
+        num_lines: Maximum number of lines to return
+        start_datetime: Optional datetime object - only return entries >= this datetime
     """
     global ai_log
     all_lines = []
     seen_lines = set()  # Track seen lines to avoid duplicates
     
-    # Helper function to extract timestamp for sorting
+    # Helper function to extract timestamp for sorting and filtering
     def extract_timestamp(line):
         try:
             if '[' in line and ']' in line:
@@ -143,6 +172,13 @@ def get_radio_ai_log(radio="", num_lines=100):
         except (ValueError, IndexError):
             pass
         return datetime.min
+    
+    def should_include(line):
+        """Check if line should be included based on start_datetime"""
+        if start_datetime is None:
+            return True
+        line_timestamp = extract_timestamp(line)
+        return line_timestamp >= start_datetime
     
     # Read from AI log files first (oldest to newest)
     if os.path.exists(LOG_DIR):
@@ -160,7 +196,7 @@ def get_radio_ai_log(radio="", num_lines=100):
                             # Filter by radio if specified
                             if radio and radio.upper() not in line.upper():
                                 continue
-                            if line not in seen_lines:
+                            if line not in seen_lines and should_include(line):
                                 seen_lines.add(line)
                                 file_lines.append(line)
             except (IOError, OSError):
@@ -172,13 +208,23 @@ def get_radio_ai_log(radio="", num_lines=100):
     for line in ai_log:
         if radio and radio.upper() not in line.upper():
             continue
-        if line not in seen_lines:
+        if line not in seen_lines and should_include(line):
             seen_lines.add(line)
             all_lines.append(line)
     
-    # Sort by timestamp (most recent first) and limit
-    all_lines.sort(key=extract_timestamp, reverse=True)
-    return all_lines[:num_lines]
+    # Sort by timestamp
+    # If start_datetime is provided, we want entries right after the timestamp (chronological order)
+    # Otherwise, we want the most recent entries (reverse chronological order)
+    if start_datetime is not None:
+        # Sort chronologically (oldest first) to get entries right after the timestamp
+        all_lines.sort(key=extract_timestamp, reverse=False)
+        # Take the first num_lines entries (right after the timestamp)
+        # Return in chronological order (oldest first) - bot will handle display order
+        return all_lines[:num_lines]
+    else:
+        # Sort reverse (most recent first) and limit
+        all_lines.sort(key=extract_timestamp, reverse=True)
+        return all_lines[:num_lines]
 
 def search_radio_log(radio="", keyword="", max_results=50):
     """

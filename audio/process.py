@@ -12,6 +12,7 @@ import queue
 class StreamProcessor:
     CONTEXT_LEN = 3
     MAX_MSG_STORAGE = 100
+    MAX_CODEWORD_STORAGE = 10
 
     def __init__(
         self,
@@ -42,6 +43,7 @@ class StreamProcessor:
         self.step_size = int(sample_rate * (buffer_seconds - buffer_overlap) * 2)
         self.window_start = 0
         self.previous_texts = []
+        self.previous_codewords = []
         self.last_alert_time = 0
         self.do_save_full_clip = 0
         self.lock = threading.Lock()
@@ -131,6 +133,9 @@ class StreamProcessor:
         context = f"{" ".join(self.previous_texts[-self.CONTEXT_LEN:]) if self.previous_texts and len(self.previous_texts) > self.CONTEXT_LEN else ''} {text}"
         code_word = self.genAIHandler.generate(context)
         if code_word:
+            self.previous_codewords.append(code_word)
+            if len(self.previous_codewords) > self.MAX_CODEWORD_STORAGE:
+                self.previous_codewords = self.previous_codewords[-self.MAX_CODEWORD_STORAGE :]
             self.send_alert(match, code_word, context)
         else:
             logger.log_event(

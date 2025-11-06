@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from utils import logger
@@ -11,6 +12,48 @@ class TelegramBot():
         self.radioListener = radioListener
         self.app = None # Initialize Application here
         self.loop = None
+    
+    @staticmethod
+    def parse_datetime(datetime_str):
+        """
+        Parse datetime string in various formats:
+        - "2025-11-04 10:30:00"
+        - "2025-11-04 10:30"
+        - "2025-11-04"
+        - "10:30:00" (assumes today)
+        - "10:30" (assumes today)
+        """
+        if not datetime_str:
+            return None
+        
+        datetime_str = datetime_str.strip()
+        today = datetime.now().date()
+        
+        # Try different formats
+        formats = [
+            "%Y-%m-%d %H:%M:%S",  # 2025-11-04 10:30:00
+            "%Y-%m-%d %H:%M",     # 2025-11-04 10:30
+            "%Y-%m-%d",            # 2025-11-04
+            "%H:%M:%S",            # 10:30:00 (today)
+            "%H:%M",               # 10:30 (today)
+        ]
+        
+        for fmt in formats:
+            try:
+                if fmt.startswith("%H"):
+                    # Time-only format - combine with today's date
+                    parsed_time = datetime.strptime(datetime_str, fmt).time()
+                    return datetime.combine(today, parsed_time)
+                else:
+                    parsed = datetime.strptime(datetime_str, fmt)
+                    if fmt == "%Y-%m-%d":
+                        # Date only - set to start of day
+                        return parsed.replace(hour=0, minute=0, second=0, microsecond=0)
+                    return parsed
+            except ValueError:
+                continue
+        
+        return None
 
     def bot_main(self):
         # Build the Application inside the async function to ensure it's in the correct event loop
@@ -48,19 +91,48 @@ class TelegramBot():
         await update.message.reply_text('Hello! I am your bot.')
 
     async def log_command(self, update, context):
+        """Get log entries. Usage: /log [num_lines] [radio] [start_datetime]
+        Examples:
+        /log 50 Mix106.5
+        /log 50 Mix106.5 2025-11-04 10:30:00
+        /log 50 Mix106.5 2025-11-04
+        /log 50 Mix106.5 10:30:00
+        """
         num_lines = 10
         radio = ""
+        start_datetime = None
         arg = 0
+        
         if len(context.args) > arg and context.args[arg].isdigit():
             num_lines = int(context.args[arg])
             arg += 1
+        
+        # Parse radio name (if present)
         if len(context.args) > arg:
-            radio = context.args[arg]
-        log_lines = logger.get_radio_log(radio, num_lines)
+            next_arg = context.args[arg]
+            # Check if it matches a radio name
+            for radio_name in self.radioListener.controllers.keys():
+                if radio_name.startswith(next_arg.upper()):
+                    radio = next_arg
+                    arg += 1
+                    break
+        
+        # Parse date/time from remaining args (could be multiple words like "2025-11-04 10:30:00")
+        if len(context.args) > arg:
+            datetime_str = " ".join(context.args[arg:])
+            start_datetime = self.parse_datetime(datetime_str)
+        
+        log_lines = logger.get_radio_log(radio, num_lines, start_datetime)
         if not log_lines:
             await update.message.reply_text("No logs found.")
             return
         
+        # Only invert if no start_datetime was provided (when start_datetime is provided, 
+        # results are already in chronological order from oldest to newest)
+        if start_datetime is None:
+            #invert the results so the most recent is last
+            log_lines.reverse()
+
         # Format results - Telegram has a 4096 character limit per message
         msg_lines = []
         for line in log_lines:
@@ -78,19 +150,48 @@ class TelegramBot():
             await update.message.reply_text("\n".join(msg_lines))
 
     async def ailog_command(self, update, context):
+        """Get AI log entries. Usage: /ailog [num_lines] [radio] [start_datetime]
+        Examples:
+        /ailog 50 Mix106.5
+        /ailog 50 Mix106.5 2025-11-04 10:30:00
+        /ailog 50 Mix106.5 2025-11-04
+        /ailog 50 Mix106.5 10:30:00
+        """
         num_lines = 10
         radio = ""
+        start_datetime = None
         arg = 0
+        
         if len(context.args) > arg and context.args[arg].isdigit():
             num_lines = int(context.args[arg])
             arg += 1
+        
+        # Parse radio name (if present)
         if len(context.args) > arg:
-            radio = context.args[arg]
-        log_lines = logger.get_radio_ai_log(radio, num_lines)
+            next_arg = context.args[arg]
+            # Check if it matches a radio name
+            for radio_name in self.radioListener.controllers.keys():
+                if radio_name.startswith(next_arg.upper()):
+                    radio = next_arg
+                    arg += 1
+                    break
+        
+        # Parse date/time from remaining args (could be multiple words like "2025-11-04 10:30:00")
+        if len(context.args) > arg:
+            datetime_str = " ".join(context.args[arg:])
+            start_datetime = self.parse_datetime(datetime_str)
+        
+        log_lines = logger.get_radio_ai_log(radio, num_lines, start_datetime)
         if not log_lines:
             await update.message.reply_text("No AI logs found.")
             return
         
+        # Only invert if no start_datetime was provided (when start_datetime is provided, 
+        # results are already in chronological order from oldest to newest)
+        if start_datetime is None:
+            #invert the results so the most recent is last
+            log_lines.reverse()
+
         # Format results - Telegram has a 4096 character limit per message
         msg_lines = []
         for line in log_lines:
@@ -172,7 +273,9 @@ class TelegramBot():
             return
         msg = "\n".join(controller.processor.previous_codewords[-num_lines:])
         if msg:
-            await update.message.reply_text(msg)
+            await update.message.reply_text(f"Codewords for {radio}:\n{msg}")
+        else:
+            await update.message.reply_text(f"No codewords found for {radio}.")
 
     async def search_command(self, update, context):
         """Search logs for a keyword or phrase.
@@ -231,6 +334,9 @@ class TelegramBot():
             await update.message.reply_text(f"No matches found for '{keyword}'{radio_msg}")
             return
         
+        #invert the results so the most recent is last
+        results.reverse()
+
         # Format results - Telegram has a 4096 character limit per message
         msg_lines = []
         for line in results:
