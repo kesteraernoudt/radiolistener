@@ -1,9 +1,9 @@
 You are given a transcript of a radio show. Sometimes, the host announces a special code word or secret word for a contest. This can be introduced in different ways, such as:
-“The code word is ...”
-“Today’s keyword is ...”
-“Remember the word ...”
-“The magic word is ...”
-“Our secret word for this hour is ...”
+"The code word is ..."
+"Today’s keyword is ..."
+"Remember the word ..."
+"The magic word is ..."
+"Our secret word for this hour is ..."
 
 Your task:
 Work case-insensitively when detecting.
