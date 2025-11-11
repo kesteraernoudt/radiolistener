@@ -23,7 +23,7 @@ def index():
                 "conf": ctrl.RADIO_CONF,
                 "stream_url": ctrl.RADIO_CONF.get("STREAM_URL", ""),
                 "phrases": ctrl.RADIO_CONF.get("PHRASES", []),
-                "logs": logger.get_radio_log(name, 100),
+                "logs": logger.get_radio_log(name, 100, reverse=True),
                 "stats": ctrl.get_stats(),
             }
         )
@@ -65,7 +65,7 @@ def restart_radio(name):
 @app.route("/radio/logs", defaults={"name": ""})
 @app.route("/radio/<name>/logs")
 def radio_logs(name):
-    logs = logger.get_radio_log(name, 200)
+    logs = logger.get_radio_log(name, 200, reverse=True)
     return jsonify(logs=logs)
 
 

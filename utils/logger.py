@@ -44,7 +44,7 @@ def cleanup_logs(days=7):
             if mtime < cutoff:
                 os.remove(path)
 
-def get_radio_log(radio="", num_lines=100, start_datetime=None):
+def get_radio_log(radio="", num_lines=100, start_datetime=None, reverse=False):
     """
     Get radio log entries from both in-memory logs and log files.
     Deduplicates entries to avoid showing the same line twice.
@@ -53,6 +53,7 @@ def get_radio_log(radio="", num_lines=100, start_datetime=None):
         radio: Radio station name (empty string for all radios)
         num_lines: Maximum number of lines to return
         start_datetime: Optional datetime object - only return entries >= this datetime
+        reverse: Optional boolean - reverse the order of the logs
     """
     global transcript_log
     all_lines = []
@@ -142,11 +143,14 @@ def get_radio_log(radio="", num_lines=100, start_datetime=None):
         # Take the first num_lines entries (right after the timestamp)
         result = all_lines[:num_lines]
         # Reverse for display (most recent last)
-        result.reverse()
+        if not reverse:
+            result.reverse()
         return result
     else:
         # Sort reverse (most recent first) and limit
         all_lines.sort(key=extract_timestamp, reverse=True)
+        if reverse:
+            all_lines.reverse()
         return all_lines[:num_lines]
 
 def get_radio_ai_log(radio="", num_lines=100, start_datetime=None):
