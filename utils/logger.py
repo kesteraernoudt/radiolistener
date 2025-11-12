@@ -143,15 +143,15 @@ def get_radio_log(radio="", num_lines=100, start_datetime=None, reverse=False):
         # Take the first num_lines entries (right after the timestamp)
         result = all_lines[:num_lines]
         # Reverse for display (most recent last)
-        if not reverse:
-            result.reverse()
+        result.reverse()
         return result
     else:
         # Sort reverse (most recent first) and limit
         all_lines.sort(key=extract_timestamp, reverse=True)
+        result = all_lines[:num_lines]
         if reverse:
-            all_lines.reverse()
-        return all_lines[:num_lines]
+            result.reverse()
+        return result
 
 def get_radio_ai_log(radio="", num_lines=100, start_datetime=None):
     """
