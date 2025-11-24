@@ -1,0 +1,24 @@
+{
+    "NAME": "Alt987",
+    "PHRASES": [
+        {
+            "mode": "regex",
+            "text": "text (now|immediately)"
+        },
+        {
+            "mode": "contains",
+            "text": "disney"
+        },
+        {
+            "mode": "contains",
+            "text": "code word"
+        },
+        {
+            "mode": "contains",
+            "text": "great America"
+        }
+    ],
+    "SMS_NUMBER": "+1844-844-4432",
+    "STREAM_URL": "https://cloud-proxy-hls.revma.ihrhls.com/zc201/5_1f0pc2ttjwjii02/main/176581786.aac?rj-org=n05b-e2",
+    "URL": "https://alt987fm.iheart.com/promotions/enter-for-your-chance-to-win-1828659/"
+}

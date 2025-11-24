@@ -111,8 +111,10 @@ class StreamProcessor:
         alert_msg = f"🚨 '{matches}' heard - codeword is {code_word}"
         if "SMS_NUMBER" in self.radio_conf:
             alert_msg += f": text to {self.radio_conf['SMS_NUMBER']}"
-        if "CALL_NUMBER" in self.radio_conf:
+        elif "CALL_NUMBER" in self.radio_conf:
             alert_msg += f": call {self.radio_conf['CALL_NUMBER']}"
+        elif "URL" in self.radio_conf:
+            alert_msg += f": submit at {self.radio_conf['URL']}"
         logger.log_event(self.radio_conf["NAME"], alert_msg)
         print(self.radio_conf["NAME"] + ": " + alert_msg)
         if now - self.last_alert_time > 300:  # MIN_ALERT_INTERVAL

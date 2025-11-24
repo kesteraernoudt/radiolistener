@@ -8,7 +8,7 @@
   "RADIO_CONFIGS": [
     "106.5.json",
     "alice.json",
-    "99.7now.json"
+    "kyxy.json"
   ],
   "WHISPER_MODEL": "small.en"
 }

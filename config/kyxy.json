@@ -1,0 +1,19 @@
+{
+  "NAME": "KyXy",
+  "PHRASES": [
+    {
+      "mode": "regex",
+      "text": "text (now|immediately)"
+    },
+    {
+      "mode": "contains",
+      "text": "disney"
+    },
+    {
+      "mode": "contains",
+      "text": "code word"
+    }
+  ],
+  "STREAM_URL": "https://live.amperwave.net/manifest/audacy-kyxyfmaac-hlsc.m3u8",
+  "URL": "https://www.audacy.com/kyxy/contests/enter-for-a-chance-to-win-tickets-to-disneyland-resort-11-25"
+}
