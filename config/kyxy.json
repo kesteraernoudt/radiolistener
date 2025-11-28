@@ -14,6 +14,7 @@
       "text": "code word"
     }
   ],
-  "STREAM_URL": "https://live.amperwave.net/manifest/audacy-kyxyfmaac-hlsc.m3u8",
+  "STREAM_URL": "https://prod-18-232-145-154.amperwave.net/audacy-kyxyfmaac-imc",
+  "STREAM_URL_OLD": "https://live.amperwave.net/manifest/audacy-kyxyfmaac-hlsc.m3u8",
   "URL": "https://www.audacy.com/kyxy/contests/enter-for-a-chance-to-win-tickets-to-disneyland-resort-11-25"
 }
