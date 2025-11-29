@@ -25,6 +25,7 @@ class StreamProcessor:
         GENAI_API_KEY: str = "",
         pre_prompt_file: str = "",
         controller=None,
+        log_enabled: bool = True,
     ):
         self.radio_conf = radio_conf
         self.whisper_model = whisper.load_model(
@@ -36,6 +37,7 @@ class StreamProcessor:
         self.CLIP_DURATION = CLIP_DURATION
         self.genAIHandler = genai.GenAIHandler(GENAI_API_KEY, pre_prompt_file)
         self.controller = controller
+        self.log_enabled = log_enabled
 
         self.rolling_buffer = b""
         self.max_buffer_size = int(sample_rate * CLIP_DURATION * 2)
@@ -52,6 +54,7 @@ class StreamProcessor:
         self.transcribe_out = queue.Queue()
         self.transcriber_thread = threading.Thread(target=self._transcriber_loop, daemon=True)
         self.transcriber_thread.start()
+        self.active_transcribes = 0
         self.stats = {
             "t_transcribe": 0.0,
             "t_ai": 0.0,
@@ -115,7 +118,8 @@ class StreamProcessor:
             alert_msg += f": call {self.radio_conf['CALL_NUMBER']}"
         elif "URL" in self.radio_conf:
             alert_msg += f": submit at {self.radio_conf['URL']}"
-        logger.log_event(self.radio_conf["NAME"], alert_msg)
+        if self.log_enabled:
+            logger.log_event(self.radio_conf["NAME"], alert_msg)
         print(self.radio_conf["NAME"] + ": " + alert_msg)
         if now - self.last_alert_time > 300:  # MIN_ALERT_INTERVAL
             # telegram_notifier.send_telegram(alert_msg)
@@ -140,10 +144,11 @@ class StreamProcessor:
                 self.previous_codewords = self.previous_codewords[-self.MAX_CODEWORD_STORAGE :]
             self.send_alert(match, code_word, context)
         else:
-            logger.log_event(
-                self.radio_conf["NAME"],
-                f"No code word found for match: {match}, text was: {context}",
-            )
+            if self.log_enabled:
+                logger.log_event(
+                    self.radio_conf["NAME"],
+                    f"No code word found for match: {match}, text was: {context}",
+                )
         return code_word
 
     def process_audio(self, audio_queue):
@@ -151,19 +156,19 @@ class StreamProcessor:
         while getattr(self, 'controller', None) and getattr(self.controller, 'running', False):
             try:
                 data = audio_queue.popleft()
-            except:
-                # Avoid busy-spin when queue is empty; give capture thread time to fill
-                time.sleep(0.01)
-                continue
+                got_audio = True
+            except IndexError:
+                got_audio = False
 
-            # add incoming data under lock
-            with self.lock:
-                self.rolling_buffer += data
-                # Trim buffer to max size
-                if len(self.rolling_buffer) > self.max_buffer_size:
-                    trim_amount = len(self.rolling_buffer) - self.max_buffer_size
-                    self.rolling_buffer = self.rolling_buffer[-self.max_buffer_size :]
-                    self.window_start = max(0, self.window_start - trim_amount)
+            if got_audio:
+                # add incoming data under lock
+                with self.lock:
+                    self.rolling_buffer += data
+                    # Trim buffer to max size
+                    if len(self.rolling_buffer) > self.max_buffer_size:
+                        trim_amount = len(self.rolling_buffer) - self.max_buffer_size
+                        self.rolling_buffer = self.rolling_buffer[-self.max_buffer_size :]
+                        self.window_start = max(0, self.window_start - trim_amount)
 
             # Process as many windows as possible. We grab each frame under lock
             # but do transcription in a single background thread and drain results FIFO.
@@ -173,6 +178,7 @@ class StreamProcessor:
                     if can_take_frame:
                         frame_start = self.window_start
                         frame_end = self.window_start + self.frame_size
+                        # Advance immediately; if the queue is full we drop this frame to stay near real-time
                         self.window_start += self.step_size
                         buffer = self.rolling_buffer[frame_start:frame_end]
                     else:
@@ -185,8 +191,12 @@ class StreamProcessor:
                 try:
                     self.transcribe_in.put_nowait(buffer)
                 except queue.Full:
-                    # Stop taking more frames this cycle if transcriber is backlogged
+                    # Stop taking more frames this cycle if transcriber is backlogged; window has advanced
                     break
+
+            if not got_audio:
+                # Avoid busy-spin when queue is empty; give capture thread time to fill
+                time.sleep(0.01)
 
             # Drain all available results FIFO (single worker preserves order)
             while True:
@@ -218,7 +228,8 @@ class StreamProcessor:
                         if ctrl is not None and hasattr(ctrl, 'send_audio'):
                             ctrl.send_audio(last_clip_path, caption="")
 
-                    logger.log_event(self.radio_conf.get("NAME", "UNKNOWN"), text)
+                    if self.log_enabled:
+                        logger.log_event(self.radio_conf.get("NAME", "UNKNOWN"), text)
 
                     t_match_start = time.time()
                     matches = self.phrase_matches(text, self.radio_conf["PHRASES"])
@@ -284,6 +295,8 @@ class StreamProcessor:
             except queue.Empty:
                 continue
             try:
+                with self.lock:
+                    self.active_transcribes += 1
                 t0 = time.time()
                 audio_np = np.frombuffer(buffer_bytes, np.int16).astype("float32") / 32768.0
                 whisper_result = self.whisper_model.transcribe(
@@ -300,3 +313,6 @@ class StreamProcessor:
             except Exception as e:
                 logging.exception(f"Transcriber loop error: {e}")
                 self.transcribe_out.put({"text": "", "t_transcribe": 0})
+            finally:
+                with self.lock:
+                    self.active_transcribes = max(0, self.active_transcribes - 1)

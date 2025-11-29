@@ -2,13 +2,20 @@ import subprocess
 from utils import logger
 import time
 
-
 NO_AUDIO_TIMEOUT_SECONDS = 180  # Time to wait for audio before treating stream as stalled
-
 
 def capture_stream(q, stream_url, controller):
     cmd = [
         "ffmpeg",
+        "-nostdin",
+        "-reconnect",
+        "1",
+        "-reconnect_streamed",
+        "1",
+        "-reconnect_delay_max",
+        "30",
+        "-rw_timeout",
+        "5000000",  # 5s read timeout to force reconnects on stalled sockets
         "-i",
         stream_url,
         "-f",
@@ -18,7 +25,7 @@ def capture_stream(q, stream_url, controller):
         "-ac",
         "1",
         "-af",
-        "loudnorm=I=-16:TP=-1.5:LRA=11",
+        "acompressor=threshold=-20dB:ratio=2:attack=5:release=50,volume=+3dB",
         "pipe:1",
     ]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)

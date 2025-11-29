@@ -77,6 +77,10 @@ Development notes
 - Add new station configs under `config/` as JSON files. See existing examples (`99.7now.json`, `106.5.json`, `alice.json`).
 - Tests: none included — adding small unit tests for `audio/` and `utils/` is a good next step.
 
+Offline transcription check
+- Standalone (run from repo root): `python -m tools.offline_eval --audio path/to/clip.mp3 --golden path/to/golden.txt --buffer-seconds 3 --buffer-overlap 0.6 --model small.en` (requires ffmpeg on PATH). Real-time pacing is on by default; disable with `--no-realtime-feed`. `--verbose` prints each processed segment. `--allow-tail/--no-allow-tail` controls padding a final short frame; `--idle-grace` sets how long to wait with empty queues and no progress before stopping. Prints combined transcript, per-segment timeline, stats, and a diff vs golden if provided.
+- Pytest: set env vars `OFFLINE_EVAL_AUDIO` and `OFFLINE_EVAL_GOLDEN` (optionally `OFFLINE_EVAL_MODEL`, `OFFLINE_EVAL_BUFFER_SECONDS`, `OFFLINE_EVAL_BUFFER_OVERLAP`, `OFFLINE_EVAL_MIN_RATIO`, `OFFLINE_EVAL_REALTIME_FEED`, `OFFLINE_EVAL_ALLOW_TAIL`, `OFFLINE_EVAL_IDLE_GRACE`) then run `pytest tests/offline_eval_test.py -q`. The test skips if required env vars are missing.
+
 Troubleshooting
 - Check `logs/` for runtime errors.
 - Ensure model files in `config/` are present and have correct permissions.
