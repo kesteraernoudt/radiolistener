@@ -16,7 +16,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 0 #all
+              count: all
               capabilities: [gpu]
     volumes:
       - ./logs:/app/logs

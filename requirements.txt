@@ -1,7 +1,16 @@
 Flask
 openai-whisper
+faster-whisper
+ctranslate2
 numpy
 ffmpeg-python
+regex
+numba
+soundfile
+huggingface-hub
+tokenizers
+sentencepiece
+packaging
 python-telegram-bot[all]
 google-genai
 python-dotenv

@@ -170,6 +170,12 @@ def diff_summary(pred: str, golden: str) -> str:
     return f"match ratio: {ratio:.3f}\nDiff (golden -> predicted):\n{head}"
 
 
+def calc_match_ratio(pred: str, golden: str) -> float:
+    pred_norm = normalize_text(pred)
+    gold_norm = normalize_text(golden)
+    return difflib.SequenceMatcher(None, gold_norm.split(), pred_norm.split()).ratio()
+
+
 def run_offline_eval(
     audio_path: str,
     golden_path: str | None,
@@ -186,6 +192,13 @@ def run_offline_eval(
     verbose: bool = False,
     idle_grace: float = 5.0,
     allow_tail: bool = True,
+    asr_backend: str | None = None,
+    asr_device: str | None = None,
+    asr_compute_type: str | None = None,
+    asr_no_speech_threshold: float | None = None,
+    asr_vad_filter: bool | None = None,
+    asr_vad_min_silence_ms: int | None = None,
+    asr_min_rms: float | None = None,
 ):
     ctrl = OfflineController(name=os.path.basename(audio_path))
     base_config = load_base_config(config_path)
@@ -198,12 +211,22 @@ def run_offline_eval(
         genai_api_key = ""
         pre_prompt_file = ""
 
+    run_start = time.time()
     audio_bytes = decode_audio_to_pcm(audio_path, sample_rate)
 
     audio_queue = deque(maxlen=200)
     chunk_count = 0
     total_samples = len(audio_bytes) // 2  # int16 mono
     total_seconds = total_samples / sample_rate
+    backend = (asr_backend or base_config.get("ASR_BACKEND", "whisper")).lower()
+    device = asr_device or base_config.get("ASR_DEVICE", "auto")
+    if device and device.lower() == "gpu":
+        device = "cuda"
+    asr_compute = asr_compute_type or base_config.get("ASR_COMPUTE_TYPE", "auto")
+    asr_ns = asr_no_speech_threshold if asr_no_speech_threshold is not None else base_config.get("ASR_NO_SPEECH_THRESHOLD", 0.6)
+    asr_vad = asr_vad_filter if asr_vad_filter is not None else base_config.get("ASR_VAD_FILTER", False)
+    asr_vad_ms = asr_vad_min_silence_ms if asr_vad_min_silence_ms is not None else base_config.get("ASR_VAD_MIN_SILENCE_MS", 500)
+    asr_rms = asr_min_rms if asr_min_rms is not None else base_config.get("ASR_MIN_RMS", 0.0)
     proc = process.StreamProcessor(
         ctrl.RADIO_CONF,
         asr_whisper_model=model,
@@ -215,7 +238,15 @@ def run_offline_eval(
         pre_prompt_file=pre_prompt_file,
         controller=ctrl,
         log_enabled=False,
+        asr_backend=backend,
+        asr_device=device,
+        asr_compute_type=asr_compute,
+        asr_no_speech_threshold=asr_ns,
+        asr_vad_filter=asr_vad,
+        asr_vad_min_silence_ms=asr_vad_ms,
+        asr_min_rms=asr_rms,
     )
+    init_done = time.time()
 
     proc_thread = threading.Thread(target=proc.process_audio, args=(audio_queue,), daemon=True)
     proc_thread.start()
@@ -224,6 +255,7 @@ def run_offline_eval(
     for idx, offset in enumerate(range(0, len(audio_bytes), chunk_bytes)):
         audio_queue.append(audio_bytes[offset : offset + chunk_bytes])
         chunk_count += 1
+        sleep_for = 0.0
         if realtime_feed:
             chunk_duration = chunk_bytes / (sample_rate * 2)
             target_time = feed_start + idx * chunk_duration
@@ -245,7 +277,8 @@ def run_offline_eval(
     last_log = 0.0
     last_progress = time.time()
     last_events = 0
-    idle_grace = args.idle_grace  # seconds without progress before stopping once queues are empty
+    idle_grace_seconds = idle_grace  # seconds without progress before stopping once queues are empty
+    first_event_time = None
     while True:
         active = getattr(proc, "active_transcribes", 0)
         queues_empty = (
@@ -269,6 +302,8 @@ def run_offline_eval(
         n_events = proc.stats.get("n_events", 0)
         if n_events != last_events:
             last_progress = time.time()
+            if first_event_time is None:
+                first_event_time = last_progress
             if verbose and proc.previous_texts:
                 new_texts = proc.previous_texts[last_events:n_events] if n_events > last_events else []
                 if not new_texts and proc.previous_texts:
@@ -281,7 +316,7 @@ def run_offline_eval(
             log.warning(f"No progress for {timeout}s; stopping.")
             break
 
-        if queues_empty and (now - last_progress) >= idle_grace:
+        if queues_empty and (now - last_progress) >= idle_grace_seconds:
             break
         time.sleep(0.1)
 
@@ -299,6 +334,8 @@ def run_offline_eval(
     if golden_path:
         with open(golden_path) as f:
             golden = f.read()
+        ratio = calc_match_ratio(combined, golden)
+        log.info(f"\n=== SCORE ===\nmatch_ratio={ratio:.4f}\n")
         log.info(diff_summary(combined, golden))
 
     # Print a small timeline to inspect segmentation
@@ -310,6 +347,33 @@ def run_offline_eval(
 
     log.info("\nStats:")
     log.info(proc.get_stats())
+
+    wall_clock = time.time() - run_start
+    init_seconds = init_done - run_start
+    processing_seconds = max(0.0, wall_clock - init_seconds)
+    time_to_first = (first_event_time - init_done) if first_event_time else None
+    n_events = proc.stats.get("n_events", 0)
+    avg_transcribe = proc.stats.get("avg_transcribe", 0.0)
+    segments_per_sec = n_events / wall_clock if wall_clock > 0 else 0.0
+    segments_per_sec_proc = n_events / processing_seconds if processing_seconds > 0 else 0.0
+    rt_factor = total_seconds / wall_clock if wall_clock > 0 else 0.0
+    rt_factor_proc = total_seconds / processing_seconds if processing_seconds > 0 else 0.0
+    time_to_first_str = f"{time_to_first:.2f}" if time_to_first is not None else "n/a"
+    # How many times faster than real-time we process each buffer on average
+    chunk_rt_factor = buffer_seconds / proc.stats["avg_process"] if proc.stats.get("avg_process", 0) else 0.0
+    log.info(
+        "\n=== PERFORMANCE ===\n"
+        f"audio_seconds={total_seconds:.2f}\n"
+        f"wall_clock_seconds={wall_clock:.2f}\n"
+        f"init_seconds={init_seconds:.2f}\n"
+        f"time_to_first={time_to_first_str}\n"
+        f"processing_seconds={processing_seconds:.2f}\n"
+        f"realtime_factor={rt_factor:.3f}  # >1 means faster than real-time (includes init)\n"
+        f"realtime_factor_processing={rt_factor_proc:.3f}  # excludes init\n"
+        f"segments={n_events}, segments_per_sec={segments_per_sec:.2f}, segments_per_sec_processing={segments_per_sec_proc:.2f}\n"
+        f"avg_transcribe_seconds={avg_transcribe:.3f}\n"
+        f"avg_process_seconds={proc.stats.get('avg_process', 0.0):.3f}, chunk_realtime_factor={chunk_rt_factor:.3f}\n"
+    )
 
     return {
         "transcript": combined,
@@ -372,6 +436,51 @@ def parse_args():
         default=5.0,
         help="Seconds to wait with empty queues and no progress before stopping",
     )
+    parser.add_argument(
+        "--asr-backend",
+        choices=["whisper", "faster-whisper"],
+        help="Override ASR backend for this run (defaults to config)",
+    )
+    parser.add_argument(
+        "--asr-device",
+        default=None,
+        help="ASR device override (e.g., cuda, cpu, auto)",
+    )
+    parser.add_argument(
+        "--asr-compute",
+        default=None,
+        help="ASR compute type override (e.g., float16, int8_float16, int8_float32, auto)",
+    )
+    parser.add_argument(
+        "--asr-no-speech-threshold",
+        type=float,
+        default=None,
+        help="ASR no_speech_threshold (both backends)",
+    )
+    parser.add_argument(
+        "--asr-vad-filter",
+        action="store_true",
+        help="Enable VAD filtering in ASR (faster-whisper only)",
+    )
+    parser.add_argument(
+        "--no-asr-vad-filter",
+        dest="asr_vad_filter",
+        action="store_false",
+        help="Disable VAD filtering in ASR",
+    )
+    parser.add_argument(
+        "--asr-vad-min-silence-ms",
+        type=int,
+        default=None,
+        help="Min silence duration for VAD (ms)",
+    )
+    parser.add_argument(
+        "--asr-min-rms",
+        type=float,
+        default=None,
+        help="Skip frames with RMS below this threshold (0 to disable)",
+    )
+    parser.set_defaults(asr_vad_filter=None)
     return parser.parse_args()
 
 
@@ -393,6 +502,13 @@ if __name__ == "__main__":
             realtime_feed=args.realtime_feed,
             verbose=args.verbose,
             idle_grace=args.idle_grace,
+            asr_backend=args.asr_backend,
+            asr_device=args.asr_device,
+            asr_compute_type=args.asr_compute,
+            asr_no_speech_threshold=args.asr_no_speech_threshold,
+            asr_vad_filter=args.asr_vad_filter,
+            asr_vad_min_silence_ms=args.asr_vad_min_silence_ms,
+            asr_min_rms=args.asr_min_rms,
         )
     except RuntimeError as exc:
         log.error(exc)

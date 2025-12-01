@@ -173,6 +173,13 @@ class RadioController:
             self.CONFIG["GEMINI_API_KEY"],
             self.CONFIG["AI_PRE_PROMPT_FILE"],
             self,
+            asr_backend=self.CONFIG.get("ASR_BACKEND", "whisper"),
+            asr_device=self.CONFIG.get("ASR_DEVICE", "auto"),
+            asr_compute_type=self.CONFIG.get("ASR_COMPUTE_TYPE", "auto"),
+            asr_no_speech_threshold=self.CONFIG.get("ASR_NO_SPEECH_THRESHOLD", 0.6),
+            asr_vad_filter=self.CONFIG.get("ASR_VAD_FILTER", False),
+            asr_vad_min_silence_ms=self.CONFIG.get("ASR_VAD_MIN_SILENCE_MS", 500),
+            asr_min_rms=self.CONFIG.get("ASR_MIN_RMS", 0.0),
         )
         self.processor.process_audio(self.audio_queue)
         logging.debug(

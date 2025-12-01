@@ -1,29 +1,44 @@
-# Use official Python image
-#FROM python:3.10-slim
-FROM nvidia/cuda:13.0.1-cudnn-runtime-ubuntu24.04
+FROM nvcr.io/nvidia/pytorch:24.03-py3
+#FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 
-# Install system dependencies
+ARG DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBCONF_NONINTERACTIVE_SEEN=true
+ENV TZ=UTC
+
 RUN apt-get update && \
-    apt-get install -y ffmpeg build-essential libsndfile1 libopenblas-dev libgfortran5 python3 python3-pip && \
-    rm -rf /var/lib/apt/lists/*
+    ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
+    apt-get install -y --no-install-recommends \
+      curl \
+      gnupg \
+      ca-certificates \
+      tzdata \
+      ffmpeg \
+      pkg-config \
+      build-essential \
+      libsndfile1 \
+      libopenblas-dev \
+      libgfortran5 \
+      libavformat-dev \
+      libavcodec-dev \
+      libavdevice-dev \
+      libavutil-dev \
+      libswresample-dev \
+      libswscale-dev \
+      libavfilter-dev \
+    && dpkg-reconfigure -f noninteractive tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set work directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip install --break-system-packages --no-cache-dir -r requirements.txt
-#RUN --mount=type=cache,target=/root/.cache/pip \
-#    pip install -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the app
 COPY . .
 
-# Expose Flask port
 EXPOSE 5000
 
-# Set environment variables (optional, can be overridden)
 ENV PYTHONUNBUFFERED=1
 
-# Start the app
-CMD ["python3", "app.py"]
+CMD ["python", "app.py"]

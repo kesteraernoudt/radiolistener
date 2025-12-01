@@ -3,10 +3,11 @@ from audio import clip_saver
 from datetime import datetime
 import numpy as np
 from utils import logger, telegram_notifier, genai
-import whisper
 import threading
 import logging
 import queue
+import whisper
+import logging
 
 
 class StreamProcessor:
@@ -26,18 +27,44 @@ class StreamProcessor:
         pre_prompt_file: str = "",
         controller=None,
         log_enabled: bool = True,
+        asr_backend: str = "whisper",
+        asr_device: str = "auto",
+        asr_compute_type: str = "auto",
+        asr_no_speech_threshold: float = 0.6,
+        asr_vad_filter: bool = False,
+        asr_vad_min_silence_ms: int = 500,
+        asr_min_rms: float = 0.0,
+        asr_language: str | None = "en",
     ):
         self.radio_conf = radio_conf
-        self.whisper_model = whisper.load_model(
-            asr_whisper_model, download_root="config"
-        )
+        logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+        self.asr_backend = (asr_backend or "whisper").lower()
+        self.log_enabled = log_enabled
+        self.asr_device = (asr_device or "auto").lower()
+        if self.asr_device == "gpu":
+            self.asr_device = "cuda"
+        self.asr_compute_type = asr_compute_type
+        self.asr_no_speech_threshold = asr_no_speech_threshold
+        self.asr_vad_filter = asr_vad_filter
+        self.asr_vad_min_silence_ms = asr_vad_min_silence_ms
+        self.asr_min_rms = asr_min_rms
+        self.asr_language = asr_language
+        self.whisper_model = None
+        self.faster_whisper_model = None
+        if self.asr_backend == "faster-whisper":
+            self._init_faster_whisper(asr_whisper_model)
+        if self.asr_backend == "whisper":
+            self.whisper_model = whisper.load_model(
+                asr_whisper_model,
+                download_root="config",
+                device=self.asr_device,
+            )
         self.buffer_seconds = buffer_seconds
         self.buffer_overlap = buffer_overlap
         self.sample_rate = sample_rate
         self.CLIP_DURATION = CLIP_DURATION
         self.genAIHandler = genai.GenAIHandler(GENAI_API_KEY, pre_prompt_file)
         self.controller = controller
-        self.log_enabled = log_enabled
 
         self.rolling_buffer = b""
         self.max_buffer_size = int(sample_rate * CLIP_DURATION * 2)
@@ -92,6 +119,7 @@ class StreamProcessor:
             # "step_size": self.step_size,
             # "window_start": self.window_start,
             "previous_texts_stored": len(self.previous_texts),
+            "asr_backend": self.asr_backend,
         }
         # Merge stat dictionaries without mutating types that confuse the linter
         merged = {**stats, **self.stats}
@@ -136,7 +164,12 @@ class StreamProcessor:
             self.do_save_full_clip = 1
 
     def handle_match(self, match, text):
-        context = f"{" ".join(self.previous_texts[-self.CONTEXT_LEN:]) if self.previous_texts and len(self.previous_texts) > self.CONTEXT_LEN else ''} {text}"
+        prev_context = (
+            " ".join(self.previous_texts[-self.CONTEXT_LEN:])
+            if self.previous_texts and len(self.previous_texts) > self.CONTEXT_LEN
+            else ""
+        )
+        context = f"{prev_context} {text}".strip()
         code_word = self.genAIHandler.generate(context)
         if code_word:
             self.previous_codewords.append(code_word)
@@ -189,7 +222,9 @@ class StreamProcessor:
                 
                 # Try to enqueue for transcription without blocking infinitely
                 try:
-                    self.transcribe_in.put_nowait(buffer)
+                    # Optional RMS gate to skip near-silence frames
+                    if self._rms_passes(buffer):
+                        self.transcribe_in.put_nowait(buffer)
                 except queue.Full:
                     # Stop taking more frames this cycle if transcriber is backlogged; window has advanced
                     break
@@ -299,15 +334,7 @@ class StreamProcessor:
                     self.active_transcribes += 1
                 t0 = time.time()
                 audio_np = np.frombuffer(buffer_bytes, np.int16).astype("float32") / 32768.0
-                whisper_result = self.whisper_model.transcribe(
-                    audio_np,
-                    fp16=self.whisper_model.device.type == "cuda",
-                    no_speech_threshold=0.6,
-                    condition_on_previous_text=False,
-                )
-                # Ensure we treat text as a string
-                text_val = whisper_result.get("text", "")
-                text = str(text_val).strip() if not isinstance(text_val, str) else text_val.strip()
+                text = self._run_asr(audio_np)
                 t_transcribe = time.time() - t0
                 self.transcribe_out.put({"text": text, "t_transcribe": t_transcribe})
             except Exception as e:
@@ -316,3 +343,101 @@ class StreamProcessor:
             finally:
                 with self.lock:
                     self.active_transcribes = max(0, self.active_transcribes - 1)
+
+    def _run_asr(self, audio_np: np.ndarray) -> str:
+        if self.asr_backend == "faster-whisper" and self.faster_whisper_model:
+            try:
+                segments, _ = self.faster_whisper_model.transcribe(
+                    audio_np,
+                    language=self.asr_language,
+                    no_speech_threshold=self.asr_no_speech_threshold,
+                    vad_filter=self.asr_vad_filter,
+                    vad_parameters={"min_silence_duration_ms": self.asr_vad_min_silence_ms},
+                )
+                text = " ".join(seg.text.strip() for seg in segments).strip()
+                return text
+            except Exception as e:
+                logging.exception(f"faster-whisper failed, falling back to whisper: {e}")
+                self.asr_backend = "whisper"
+        if self.whisper_model:
+            whisper_result = self.whisper_model.transcribe(
+                audio_np,
+                fp16=self.whisper_model.device.type == "cuda",
+                language=self.asr_language,
+                no_speech_threshold=self.asr_no_speech_threshold,
+                condition_on_previous_text=False,
+            )
+            text_val = whisper_result.get("text", "")
+            text = str(text_val).strip() if not isinstance(text_val, str) else text_val.strip()
+            return text
+        return ""
+
+    def _init_faster_whisper(self, model_name: str):
+        """
+        Initialize faster-whisper with graceful fallback on unsupported device/compute combinations.
+        """
+        try:
+            from faster_whisper import WhisperModel  # type: ignore
+        except ImportError as e:
+            logging.exception(f"faster-whisper not installed: {e}")
+            self.asr_backend = "whisper"
+            return
+
+        device = self.asr_device or "auto"
+        compute_type = self.asr_compute_type or "auto"
+
+        def try_load(dev, ctype):
+            return WhisperModel(
+                model_name,
+                device=dev,
+                compute_type=ctype,
+                download_root="config",
+            )
+
+        attempts = []
+        # user-requested first
+        attempts.append((device, compute_type))
+        # fallbacks on same device
+        if compute_type != "auto":
+            attempts.append((device, "auto"))
+        if device == "cuda":
+            attempts.append((device, "float16"))
+
+        # Always try CPU-friendly fallbacks as a last resort to avoid cuDNN issues
+        cpu_dev = "cpu"
+        attempts.extend(
+            [
+                (cpu_dev, "int8_float32"),
+                (cpu_dev, "int8"),
+                (cpu_dev, "float32"),
+                (cpu_dev, "auto"),
+            ]
+        )
+
+        for dev, ctype in attempts:
+            try:
+                self.faster_whisper_model = try_load(dev, ctype)
+                self.asr_backend = "faster-whisper"
+                if dev != device or ctype != compute_type:
+                    logging.info(
+                        f"faster-whisper loaded with fallback device/compute: device={dev}, compute={ctype}"
+                    )
+                return
+            except Exception as e:
+                logging.warning(f"faster-whisper init failed for device={dev}, compute={ctype}: {e}")
+                continue
+
+        logging.error("All faster-whisper init attempts failed; falling back to whisper.")
+        self.asr_backend = "whisper"
+
+    def _rms_passes(self, buffer: bytes) -> bool:
+        if self.asr_min_rms <= 0:
+            return True
+        try:
+            arr = np.frombuffer(buffer, np.int16).astype(np.float32) / 32768.0
+            if arr.size == 0:
+                return False
+            rms = np.sqrt(np.mean(arr * arr))
+            return rms >= self.asr_min_rms
+        except Exception:
+            return True
