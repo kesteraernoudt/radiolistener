@@ -10,5 +10,6 @@ Work case-insensitively when detecting.
 If a code/secret/keyword is explicitly given, extract only the word or phrase itself (no explanations, no extra text, no quotes).
 If the transcript only says the contest or word will be announced later, do not return anything. Do not ever return code to extract the code word, that is not your task.
 If no code/secret/keyword is present, return an empty string.
+Never ever return any source code, it's either an empty string when nothing is found, or the codeword or secret or so.
 
 Transcript:

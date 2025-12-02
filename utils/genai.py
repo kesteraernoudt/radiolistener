@@ -34,6 +34,10 @@ class GenAIHandler:
                 contents=self.PRE_PROMPT + prompt
             )
             logger.log_ai_event(f"GenAIHandler response: {response.text}")
+            # this should be a keyword or codeword or so, not a long response. So filter out any long reply
+            if len(response.text) > 30:
+                logger.log_ai_event(f"This is a way too long response to be a codeword, so skipping")
+                return None
             return response.text
         except Exception as e:
             print(f"GenAIHandler generate error: {e}")
