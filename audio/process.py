@@ -172,6 +172,9 @@ class StreamProcessor:
         context = f"{prev_context} {text}".strip()
         code_word = self.genAIHandler.generate(context)
         if code_word:
+            # Skip duplicate code words to avoid repeat alerts/logs
+            if code_word in self.previous_codewords:
+                return None
             self.previous_codewords.append(code_word)
             if len(self.previous_codewords) > self.MAX_CODEWORD_STORAGE:
                 self.previous_codewords = self.previous_codewords[-self.MAX_CODEWORD_STORAGE :]
