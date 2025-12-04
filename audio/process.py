@@ -120,6 +120,7 @@ class StreamProcessor:
             # "window_start": self.window_start,
             "previous_texts_stored": len(self.previous_texts),
             "asr_backend": self.asr_backend,
+            "previous_codewords": self._codeword_texts(),
         }
         # Merge stat dictionaries without mutating types that confuse the linter
         merged = {**stats, **self.stats}
@@ -163,6 +164,34 @@ class StreamProcessor:
             self.last_alert_time = now
             self.do_save_full_clip = 1
 
+    def _codeword_texts(self):
+        return [code_word for code_word, _ in self.previous_codewords]
+
+    def get_codewords(self, limit=None):
+        codewords = self._codeword_texts()
+        if limit is not None:
+            return codewords[-limit:]
+        return codewords
+
+    def _clear_codewords_if_stale(self, now: datetime | None = None):
+        if not self.previous_codewords:
+            return
+        now = now or datetime.now()
+        last_ts = self.previous_codewords[-1][1]
+        if last_ts.date() != now.date():
+            self.previous_codewords.clear()
+            if self.log_enabled:
+                logger.log_event(self.radio_conf.get("NAME", "UNKNOWN"), "Cleared previous codewords after day change")
+
+    def _has_codeword(self, code_word: str) -> bool:
+        return any(stored_word == code_word for stored_word, _ in self.previous_codewords)
+
+    def _add_codeword(self, code_word: str, now: datetime | None = None):
+        now = now or datetime.now()
+        self.previous_codewords.append((code_word, now))
+        if len(self.previous_codewords) > self.MAX_CODEWORD_STORAGE:
+            self.previous_codewords = self.previous_codewords[-self.MAX_CODEWORD_STORAGE :]
+
     def handle_match(self, match, text):
         prev_context = (
             " ".join(self.previous_texts[-self.CONTEXT_LEN:])
@@ -170,14 +199,14 @@ class StreamProcessor:
             else ""
         )
         context = f"{prev_context} {text}".strip()
-        code_word = self.genAIHandler.generate(context)
+        code_word = self.genAIHandler.generate(context, radio=self.radio_conf.get("NAME", ""))
         if code_word:
             # Skip duplicate code words to avoid repeat alerts/logs
-            if code_word in self.previous_codewords:
+            now = datetime.now()
+            self._clear_codewords_if_stale(now)
+            if self._has_codeword(code_word):
                 return None
-            self.previous_codewords.append(code_word)
-            if len(self.previous_codewords) > self.MAX_CODEWORD_STORAGE:
-                self.previous_codewords = self.previous_codewords[-self.MAX_CODEWORD_STORAGE :]
+            self._add_codeword(code_word, now)
             self.send_alert(match, code_word, context)
         else:
             if self.log_enabled:

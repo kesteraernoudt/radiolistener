@@ -11,6 +11,63 @@ MAX_AI_LINES = 1000
 transcript_log = defaultdict(list)
 ai_log = list()
 
+
+def _extract_timestamp(line):
+    try:
+        if "[" in line and "]" in line:
+            header = line.split("[", 1)[1].split("]", 1)[0]
+            ts_part = header.split(" - ")[0]
+            return datetime.strptime(ts_part, "%Y-%m-%d %H:%M:%S")
+    except (ValueError, IndexError):
+        pass
+    return datetime.min
+
+
+def _extract_radio_tag(line):
+    try:
+        if "[" in line and "]" in line:
+            header = line.split("[", 1)[1].split("]", 1)[0]
+            parts = header.split(" - ")
+            if len(parts) == 2:
+                return parts[1].strip().upper()
+    except (ValueError, IndexError):
+        pass
+    return ""
+
+
+def _should_include(line, start_datetime):
+    if start_datetime is None:
+        return True
+    return _extract_timestamp(line) >= start_datetime
+
+
+def _dedupe_preserve_order(lines):
+    seen = set()
+    unique = []
+    for line in lines:
+        if line in seen:
+            continue
+        seen.add(line)
+        unique.append(line)
+    return unique
+
+
+def _finalize_lines(lines, num_lines, start_datetime=None, reverse=False, reverse_after_slice=False):
+    # When start_datetime is provided, lines are already filtered; keep chronological order unless caller wants reverse
+    if start_datetime is not None:
+        lines.sort(key=_extract_timestamp, reverse=False)
+        result = lines[:num_lines]
+        if reverse_after_slice:
+            result.reverse()
+        return result
+
+    # Default: newest first
+    lines.sort(key=_extract_timestamp, reverse=True)
+    result = lines[:num_lines]
+    if reverse:
+        result.reverse()
+    return result
+
 def log_event(radio, msg):
     global transcript_log
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -23,10 +80,11 @@ def log_event(radio, msg):
         f.write(line + "\n")
     return line
 
-def log_ai_event(msg):
+def log_ai_event(msg, radio=""):
     global ai_log
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] {msg}"
+    radio_tag = (radio or "GLOBAL").upper()
+    line = f"[{ts} - {radio_tag}] {msg}"
     ai_log.append(line)
     if len(ai_log) > MAX_AI_LINES:
         ai_log = ai_log[-MAX_AI_LINES:]
@@ -58,100 +116,70 @@ def get_radio_log(radio="", num_lines=100, start_datetime=None, reverse=False):
     global transcript_log
     all_lines = []
     seen_lines = set()  # Track seen lines to avoid duplicates
-    
-    # Helper function to extract timestamp for sorting and filtering
-    def extract_timestamp(line):
-        try:
-            if '[' in line and ']' in line:
-                timestamp_str = line.split('[')[1].split(']')[0].split(' - ')[0]
-                return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
-        except (ValueError, IndexError):
-            pass
-        return datetime.min
-    
-    def should_include(line):
-        """Check if line should be included based on start_datetime"""
-        if start_datetime is None:
-            return True
-        line_timestamp = extract_timestamp(line)
-        return line_timestamp >= start_datetime
-    
+    radio_upper = radio.upper()
+
     # Read from log files first (oldest to newest)
     if os.path.exists(LOG_DIR):
-        file_lines = []
         for filename in sorted(os.listdir(LOG_DIR)):
-            if not filename.endswith('.log') or filename.endswith('_ai.log'):
+            if not filename.endswith(".log") or filename.endswith("_ai.log"):
                 continue
-            
+
             # Extract radio name from filename (format: YYYY-MM-DD-{radio}.log)
-            if '-' in filename:
-                parts = filename.rsplit('-', 1)
+            if "-" in filename:
+                parts = filename.rsplit("-", 1)
                 if len(parts) == 2:
-                    file_radio = parts[1].replace('.log', '').upper()
+                    file_radio = parts[1].replace(".log", "").upper()
                     # Skip if radio specified and doesn't match
-                    if radio and not file_radio.startswith(radio.upper()):
+                    if radio and not file_radio.startswith(radio_upper):
                         continue
                 elif radio:
                     continue
             elif radio:
                 continue
-            
+
             filepath = os.path.join(LOG_DIR, filename)
             try:
-                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                     for line in f:
                         line = line.strip()
-                        if line and line not in seen_lines and should_include(line):
+                        if line and line not in seen_lines and _should_include(line, start_datetime):
                             seen_lines.add(line)
-                            file_lines.append(line)
+                            all_lines.append(line)
             except (IOError, OSError):
                 continue
-        
-        all_lines.extend(file_lines)
-    
+
     # Add in-memory logs (these are the most recent, may overlap with latest log file)
     if not radio:
-        # return combined log from all radios
         for lines in transcript_log.values():
             for line in lines:
-                if line not in seen_lines and should_include(line):
+                if line not in seen_lines and _should_include(line, start_datetime):
                     seen_lines.add(line)
                     all_lines.append(line)
     else:
-        # Find matching radio(s)
         matching_radios = []
-        if radio.upper() in transcript_log:
-            matching_radios.append(radio.upper())
+        if radio_upper in transcript_log:
+            matching_radios.append(radio_upper)
         else:
-            # see if it's the beginning of a radio name
             for name in transcript_log.keys():
-                if name.startswith(radio.upper()):
+                if name.startswith(radio_upper):
                     matching_radios.append(name)
-        
+
         for radio_name in matching_radios:
             for line in transcript_log[radio_name]:
-                if line not in seen_lines and should_include(line):
+                if line not in seen_lines and _should_include(line, start_datetime):
                     seen_lines.add(line)
                     all_lines.append(line)
-    
-    # Sort by timestamp
-    # If start_datetime is provided, we want entries right after the timestamp (chronological order)
-    # Otherwise, we want the most recent entries (reverse chronological order)
-    if start_datetime is not None:
-        # Sort chronologically (oldest first) to get entries right after the timestamp
-        all_lines.sort(key=extract_timestamp, reverse=False)
-        # Take the first num_lines entries (right after the timestamp)
-        result = all_lines[:num_lines]
-        # Reverse for display (most recent last)
-        result.reverse()
-        return result
-    else:
-        # Sort reverse (most recent first) and limit
-        all_lines.sort(key=extract_timestamp, reverse=True)
-        result = all_lines[:num_lines]
-        if reverse:
-            result.reverse()
-        return result
+
+    all_lines = _dedupe_preserve_order(all_lines)
+
+    # With start_datetime: return oldest first but reversed for display (keep behavior)
+    return _finalize_lines(
+        all_lines,
+        num_lines,
+        start_datetime=start_datetime,
+        reverse=reverse,
+        reverse_after_slice=start_datetime is not None,
+    )
 
 def get_radio_ai_log(radio="", num_lines=100, start_datetime=None):
     """
@@ -166,69 +194,52 @@ def get_radio_ai_log(radio="", num_lines=100, start_datetime=None):
     global ai_log
     all_lines = []
     seen_lines = set()  # Track seen lines to avoid duplicates
-    
-    # Helper function to extract timestamp for sorting and filtering
-    def extract_timestamp(line):
-        try:
-            if '[' in line and ']' in line:
-                timestamp_str = line.split('[')[1].split(']')[0]
-                return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
-        except (ValueError, IndexError):
-            pass
-        return datetime.min
-    
-    def should_include(line):
-        """Check if line should be included based on start_datetime"""
-        if start_datetime is None:
+
+    def matches_radio(line):
+        if not radio:
             return True
-        line_timestamp = extract_timestamp(line)
-        return line_timestamp >= start_datetime
-    
+        radio_tag = _extract_radio_tag(line)
+        if radio_tag:
+            return radio_tag.startswith(radio.upper())
+        # Fallback for legacy lines without radio info: include only when radio is empty
+        return False
+
     # Read from AI log files first (oldest to newest)
     if os.path.exists(LOG_DIR):
-        file_lines = []
         for filename in sorted(os.listdir(LOG_DIR)):
-            if not filename.endswith('_ai.log'):
+            if not filename.endswith("_ai.log"):
                 continue
-            
+
             filepath = os.path.join(LOG_DIR, filename)
             try:
-                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                     for line in f:
                         line = line.strip()
-                        if line:
-                            # Filter by radio if specified
-                            if radio and radio.upper() not in line.upper():
-                                continue
-                            if line not in seen_lines and should_include(line):
+                        if line and matches_radio(line):
+                            if line not in seen_lines and _should_include(line, start_datetime):
                                 seen_lines.add(line)
-                                file_lines.append(line)
+                                all_lines.append(line)
             except (IOError, OSError):
                 continue
-        
-        all_lines.extend(file_lines)
-    
+
     # Add in-memory AI logs (these are the most recent, may overlap with latest log file)
     for line in ai_log:
-        if radio and radio.upper() not in line.upper():
+        if not matches_radio(line):
             continue
-        if line not in seen_lines and should_include(line):
+        if line not in seen_lines and _should_include(line, start_datetime):
             seen_lines.add(line)
             all_lines.append(line)
-    
-    # Sort by timestamp
-    # If start_datetime is provided, we want entries right after the timestamp (chronological order)
-    # Otherwise, we want the most recent entries (reverse chronological order)
-    if start_datetime is not None:
-        # Sort chronologically (oldest first) to get entries right after the timestamp
-        all_lines.sort(key=extract_timestamp, reverse=False)
-        # Take the first num_lines entries (right after the timestamp)
-        # Return in chronological order (oldest first) - bot will handle display order
-        return all_lines[:num_lines]
-    else:
-        # Sort reverse (most recent first) and limit
-        all_lines.sort(key=extract_timestamp, reverse=True)
-        return all_lines[:num_lines]
+
+    all_lines = _dedupe_preserve_order(all_lines)
+
+    # For start_datetime we keep chronological order; otherwise newest first
+    return _finalize_lines(
+        all_lines,
+        num_lines,
+        start_datetime=start_datetime,
+        reverse=False,
+        reverse_after_slice=False,
+    )
 
 def search_radio_log(radio="", keyword="", max_results=50):
     """

@@ -24,6 +24,7 @@ def index():
                 "stream_url": ctrl.RADIO_CONF.get("STREAM_URL", ""),
                 "phrases": ctrl.RADIO_CONF.get("PHRASES", []),
                 "logs": logger.get_radio_log(name, 100, reverse=True),
+                "ai_logs": list(reversed(logger.get_radio_ai_log(name, 100))),
                 "stats": ctrl.get_stats(),
             }
         )
@@ -67,6 +68,19 @@ def restart_radio(name):
 def radio_logs(name):
     logs = logger.get_radio_log(name, 200, reverse=True)
     return jsonify(logs=logs)
+
+@app.route("/radio/<name>/ai_logs")
+def radio_ai_logs(name):
+    logs = list(reversed(logger.get_radio_ai_log(name, 200)))
+    return jsonify(logs=logs)
+
+@app.route("/radio/<name>/codewords")
+def radio_codewords(name):
+    ctrl = listener.controller(name)
+    if not ctrl or not ctrl.processor:
+        return jsonify(success=False, error="Radio not found"), 404
+    codewords = ctrl.processor.get_codewords()
+    return jsonify(codewords=codewords)
 
 
 @app.route("/radio/<name>/save_clip", methods=["POST"])

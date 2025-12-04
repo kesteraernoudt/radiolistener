@@ -271,7 +271,8 @@ class TelegramBot():
         if controller is None or controller.processor is None:
             await update.message.reply_text(f"No such radio station found ({radio}) or processor not initialized.")
             return
-        msg = "\n".join(controller.processor.previous_codewords[-num_lines:])
+        codewords = controller.processor.get_codewords(num_lines)
+        msg = "\n".join(codewords)
         if msg:
             await update.message.reply_text(f"Codewords for {radio}:\n{msg}")
         else:
@@ -371,7 +372,7 @@ class TelegramBot():
             return
         msg = "\n".join(controller.processor.previous_texts[-num_lines:])
         if msg:
-            codeword = controller.processor.genAIHandler.generate(msg)
+            codeword = controller.processor.genAIHandler.generate(msg, radio=controller.RADIO_CONF.get("NAME", ""))
             await update.message.reply_text(codeword if codeword else "No codeword found")
 
     async def clip_command(self, update, context):

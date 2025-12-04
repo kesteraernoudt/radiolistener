@@ -25,23 +25,27 @@ class GenAIHandler:
             if mtime != self._pre_prompt_mtime:
                 self._load_pre_prompt()
 
-    def generate(self, prompt: str, max_output_tokens: int = 1024) -> str | None:
+    def generate(self, prompt: str, radio: str = "", max_output_tokens: int = 1024) -> str | None:
         self._check_pre_prompt_update()
-        logger.log_ai_event(prompt)
+        logger.log_ai_event(f"Context: {prompt}", radio)
         try:
             response = self.client.models.generate_content(
                 model=self.MODEL,
                 contents=self.PRE_PROMPT + prompt
             )
-            logger.log_ai_event(f"GenAIHandler response: {response.text}")
-            # this should be a keyword or codeword or so, not a long response. So filter out any long reply
-            if len(response.text) > 30:
-                logger.log_ai_event(f"This is a way too long response to be a codeword, so skipping")
+            text = getattr(response, "text", "") or ""
+            logger.log_ai_event(f"Response: {text}", radio)
+            if not text:
+                logger.log_ai_event("Empty AI response; skipping", radio)
                 return None
-            return response.text
+            # this should be a keyword or codeword or so, not a long response. So filter out any long reply
+            if len(text) > 30:
+                logger.log_ai_event(f"This is a way too long response to be a codeword, so skipping", radio)
+                return None
+            return text
         except Exception as e:
             print(f"GenAIHandler generate error: {e}")
-            logger.log_ai_event(f"GenAIHandler generate error: {e}")
+            logger.log_ai_event(f"GenAIHandler generate error: {e}", radio)
             return None
         
 if __name__ == "__main__":
@@ -52,4 +56,3 @@ if __name__ == "__main__":
 
     test_prompt2 = "long. All you need to do to qualify is text this word to us right now. What is demon as a demon drop? D-E-M-O-N. That's a spell. Demon. Text that to us right now.  Hexat to us right now and you and the family could be checking out six flags great America That's a 408 506 1065 looking for the top sales at Rayleigh's and I'm"
     print(genai_handler.generate(test_prompt2))
-

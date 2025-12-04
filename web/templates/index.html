@@ -27,6 +27,33 @@
       white-space: pre-wrap;
     }
 
+    .tab-buttons {
+      display: inline-flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .tab-button {
+      border: 1px solid #ccc;
+      background: #eee;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+
+    .tab-button.active {
+      background: #ddd;
+      border-bottom: 2px solid #000;
+      font-weight: bold;
+    }
+
+    .tab-pane {
+      display: none;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
     .section {
       margin-bottom: 30px;
     }
@@ -159,8 +186,21 @@
       <button onclick="restartRadio('{{ radio.name }}')" style="margin-top:6px;">Restart</button>
     </div>
     <div>
-      <h3>Live Logs</h3>
-      <div id="logbox-{{ radio.name }}" class="logbox">{{ radio.logs | join('\n') }}</div>
+      <h3>Monitoring</h3>
+      <div class="tab-buttons">
+        <button id="tab-logs-{{ radio.name }}" class="tab-button active" onclick="setActiveTab('{{ radio.name }}','logs')">Logs</button>
+        <button id="tab-ai-{{ radio.name }}" class="tab-button" onclick="setActiveTab('{{ radio.name }}','ai')">AI Logs</button>
+        <button id="tab-codewords-{{ radio.name }}" class="tab-button" onclick="setActiveTab('{{ radio.name }}','codewords')">Codewords</button>
+      </div>
+      <div class="tab-pane active" id="logs-pane-{{ radio.name }}">
+        <div id="logbox-{{ radio.name }}" class="logbox">{{ radio.logs | join('\n') }}</div>
+      </div>
+      <div class="tab-pane" id="ai-pane-{{ radio.name }}">
+        <div id="ailogbox-{{ radio.name }}" class="logbox">{{ radio.ai_logs | join('\n') if radio.ai_logs else '' }}</div>
+      </div>
+      <div class="tab-pane" id="codewords-pane-{{ radio.name }}">
+        <div id="codewords-{{ radio.name }}" class="logbox">{{ (radio.stats.previous_codewords if radio.stats and radio.stats.get('previous_codewords') else []) | join('\n') }}</div>
+      </div>
     </div>
     <div>
       <h3>Radio Stats</h3>
@@ -535,13 +575,87 @@
         .then(res => res.json())
     }
 
+    const TAB_TYPES = ["logs", "ai", "codewords"];
+    const activeTabs = {};
+    const tabPollers = {};
+
+    function tabKey(name, tab) {
+      return `${name}-${tab}`;
+    }
+
+    function clearTabPoller(name, tab) {
+      const key = tabKey(name, tab);
+      if (tabPollers[key]) {
+        clearTimeout(tabPollers[key]);
+        tabPollers[key] = null;
+      }
+    }
+
+    function scheduleTabPoll(name, tab, fn) {
+      if (activeTabs[name] !== tab) return;
+      clearTabPoller(name, tab);
+      tabPollers[tabKey(name, tab)] = setTimeout(fn, 2000);
+    }
+
+    function setActiveTab(name, tab) {
+      activeTabs[name] = tab;
+      TAB_TYPES.forEach(t => {
+        const btn = document.getElementById(`tab-${t}-${name}`);
+        const pane = document.getElementById(`${t}-pane-${name}`);
+        if (btn) btn.classList.toggle("active", t === tab);
+        if (pane) pane.classList.toggle("active", t === tab);
+        clearTabPoller(name, t);
+      });
+
+      if (tab === "logs") {
+        reloadLogs(name);
+      } else if (tab === "ai") {
+        reloadAILogs(name);
+      } else {
+        reloadCodewords(name);
+      }
+    }
+
     function reloadLogs(name) {
+      if (activeTabs[name] !== "logs") return;
       fetch(`/radio/${name}/logs`)
         .then(res => res.json())
         .then(data => {
-          document.getElementById("logbox-" + name).innerText = data.logs.join("\n");
-          document.getElementById("logbox-" + name).scrollTop = document.getElementById("logbox-" + name).scrollHeight;
-          setTimeout(() => reloadLogs(name), 2000);
+          const el = document.getElementById("logbox-" + name);
+          el.innerText = data.logs.join("\n");
+          el.scrollTop = el.scrollHeight;
+        })
+        .finally(() => {
+          scheduleTabPoll(name, "logs", () => reloadLogs(name));
+        });
+    }
+
+    function reloadAILogs(name) {
+      if (activeTabs[name] !== "ai") return;
+      fetch(`/radio/${name}/ai_logs`)
+        .then(res => res.json())
+        .then(data => {
+          const el = document.getElementById("ailogbox-" + name);
+          el.innerText = data.logs.join("\n");
+          el.scrollTop = el.scrollHeight;
+        })
+        .finally(() => {
+          scheduleTabPoll(name, "ai", () => reloadAILogs(name));
+        });
+    }
+
+    function reloadCodewords(name) {
+      if (activeTabs[name] !== "codewords") return;
+      fetch(`/radio/${name}/codewords`)
+        .then(res => res.json())
+        .then(data => {
+          const el = document.getElementById("codewords-" + name);
+          const cw = data.codewords || [];
+          el.innerText = cw.join("\n");
+          el.scrollTop = el.scrollHeight;
+        })
+        .finally(() => {
+          scheduleTabPoll(name, "codewords", () => reloadCodewords(name));
         });
     }
 
@@ -609,7 +723,7 @@
     document.addEventListener("DOMContentLoaded", function () {
       radios.forEach(radio => {
         renderPhrases(radio.name);
-        reloadLogs(radio.name);
+        setActiveTab(radio.name, "logs");
         reloadStats(radio.name);
         document.getElementById("radio_conf_" + radio.name).value = JSON.stringify(radio.conf, null, 2);
 
