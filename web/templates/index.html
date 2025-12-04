@@ -27,6 +27,60 @@
       white-space: pre-wrap;
     }
 
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+      margin-bottom: 10px;
+    }
+
+    .stat-card {
+      background: #f9f9f9;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+
+    .stat-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #666;
+      margin-bottom: 6px;
+    }
+
+    .stat-main {
+      font-size: 20px;
+      font-weight: bold;
+      color: #111;
+      margin-bottom: 4px;
+    }
+
+    .stat-sub {
+      font-size: 12px;
+      color: #555;
+      line-height: 1.4;
+    }
+
+    .progress {
+      width: 100%;
+      height: 8px;
+      background: #e5e7eb;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 6px;
+      margin-bottom: 6px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: #10b981;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
     .tab-buttons {
       display: inline-flex;
       gap: 6px;
@@ -200,6 +254,54 @@
       </div>
       <div class="tab-pane" id="codewords-pane-{{ radio.name }}">
         <div id="codewords-{{ radio.name }}" class="logbox">{{ (radio.stats.previous_codewords if radio.stats and radio.stats.get('previous_codewords') else []) | join('\n') }}</div>
+      </div>
+    </div>
+    <div>
+      <h3>Realtime Performance</h3>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-title">Process Latency</div>
+          <div class="stat-main" id="latency-process-last-{{ radio.name }}">--</div>
+          <div class="stat-sub">
+            p50 <span id="latency-process-p50-{{ radio.name }}">--</span> ·
+            p90 <span id="latency-process-p90-{{ radio.name }}">--</span> ·
+            p99 <span id="latency-process-p99-{{ radio.name }}">--</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">ASR Latency</div>
+          <div class="stat-main" id="latency-asr-last-{{ radio.name }}">--</div>
+          <div class="stat-sub">
+            p50 <span id="latency-asr-p50-{{ radio.name }}">--</span> ·
+            p90 <span id="latency-asr-p90-{{ radio.name }}">--</span> ·
+            p99 <span id="latency-asr-p99-{{ radio.name }}">--</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">AI Latency</div>
+          <div class="stat-main" id="latency-ai-last-{{ radio.name }}">--</div>
+          <div class="stat-sub">
+            p50 <span id="latency-ai-p50-{{ radio.name }}">--</span> ·
+            p90 <span id="latency-ai-p90-{{ radio.name }}">--</span> ·
+            p99 <span id="latency-ai-p99-{{ radio.name }}">--</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Backlog & Drops</div>
+          <div class="stat-main" id="queue-usage-{{ radio.name }}">--</div>
+          <div class="progress"><div class="progress-bar" id="queue-bar-{{ radio.name }}"></div></div>
+          <div class="stat-sub" id="frames-dropped-{{ radio.name }}">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Throughput & Freshness</div>
+          <div class="stat-main" id="events-per-min-{{ radio.name }}">--</div>
+          <div class="stat-sub">
+            5m avg <span id="events-per-5min-{{ radio.name }}">--</span><br>
+            Last event <span id="last-event-ago-{{ radio.name }}">--</span><br>
+            Last match <span id="last-match-ago-{{ radio.name }}">--</span><br>
+            Last alert <span id="last-alert-ago-{{ radio.name }}">--</span>
+          </div>
+        </div>
       </div>
     </div>
     <div>
@@ -570,6 +672,64 @@
         .then(data => alert(data.message));
     }
 
+    function formatMs(sec) {
+      if (sec === undefined || sec === null) return "--";
+      return `${(sec * 1000).toFixed(0)} ms`;
+    }
+
+    function setText(id, text) {
+      const el = document.getElementById(id);
+      if (el) el.innerText = text;
+    }
+
+    function formatAgo(ts) {
+      if (!ts) return "--";
+      const now = Date.now() / 1000;
+      const diff = Math.max(0, now - ts);
+      if (diff < 60) return `${diff.toFixed(0)}s ago`;
+      if (diff < 3600) return `${(diff / 60).toFixed(1)}m ago`;
+      return `${(diff / 3600).toFixed(1)}h ago`;
+    }
+
+    function updatePerfCards(name, stats) {
+      // Latencies
+      setText(`latency-process-last-${name}`, formatMs(stats.last_t_process));
+      setText(`latency-process-p50-${name}`, formatMs(stats.p50_process));
+      setText(`latency-process-p90-${name}`, formatMs(stats.p90_process));
+      setText(`latency-process-p99-${name}`, formatMs(stats.p99_process));
+
+      setText(`latency-asr-last-${name}`, formatMs(stats.last_t_transcribe));
+      setText(`latency-asr-p50-${name}`, formatMs(stats.p50_transcribe));
+      setText(`latency-asr-p90-${name}`, formatMs(stats.p90_transcribe));
+      setText(`latency-asr-p99-${name}`, formatMs(stats.p99_transcribe));
+
+      setText(`latency-ai-last-${name}`, formatMs(stats.last_t_ai));
+      setText(`latency-ai-p50-${name}`, formatMs(stats.p50_ai));
+      setText(`latency-ai-p90-${name}`, formatMs(stats.p90_ai));
+      setText(`latency-ai-p99-${name}`, formatMs(stats.p99_ai));
+
+      // Queue / backlog
+      const qUsed = stats.t_transcribe_in_len || 0;
+      const qMax = stats.transcribe_queue_max || 1;
+      const pct = Math.min(100, Math.round((qUsed / qMax) * 100));
+      setText(`queue-usage-${name}`, `${qUsed}/${qMax} queued`);
+      const bar = document.getElementById(`queue-bar-${name}`);
+      if (bar) {
+        bar.style.width = `${pct}%`;
+        bar.style.background = pct > 80 ? '#ef4444' : pct > 50 ? '#f59e0b' : '#10b981';
+      }
+      const dropped = stats.frames_dropped_backlog || 0;
+      const silence = stats.frames_silence_skipped || 0;
+      setText(`frames-dropped-${name}`, `Dropped: ${dropped} · Silence gated: ${silence}`);
+
+      // Throughput & staleness
+      setText(`events-per-min-${name}`, `${stats.events_per_min || 0}/min`);
+      setText(`events-per-5min-${name}`, `${(stats.events_per_5min || 0).toFixed(2)}/min`);
+      setText(`last-event-ago-${name}`, formatAgo(stats.last_event_ts));
+      setText(`last-match-ago-${name}`, formatAgo(stats.last_match_ts));
+      setText(`last-alert-ago-${name}`, formatAgo(stats.last_alert_ts));
+    }
+
     function restartRadio(name) {
       fetch(`/radio/${name}/restart`, { method: 'POST' })
         .then(res => res.json())
@@ -664,6 +824,7 @@
         .then(res => res.json())
         .then(data => {
           document.getElementById("radio_stats_" + name).value = JSON.stringify(data.stats, null, 2);
+          updatePerfCards(name, data.stats || {});
           document.getElementById("radio_stats_" + name).scrollTop = document.getElementById("radio_stats_" + name).scrollHeight;
           setTimeout(() => reloadStats(name), 2000);
         });

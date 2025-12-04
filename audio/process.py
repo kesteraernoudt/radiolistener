@@ -7,7 +7,7 @@ import threading
 import logging
 import queue
 import whisper
-import logging
+from collections import deque
 
 
 class StreamProcessor:
@@ -74,6 +74,8 @@ class StreamProcessor:
         self.previous_texts = []
         self.previous_codewords = []
         self.last_alert_time = 0
+        self.last_match_time = 0.0
+        self.last_event_time = 0.0
         self.do_save_full_clip = 0
         self.lock = threading.Lock()
         # Single background transcription thread with queues
@@ -97,6 +99,27 @@ class StreamProcessor:
             "n_ai_events": 0,
             "t_transcribe_in_len": 0,
             "t_transcribe_out_len": 0,
+            "transcribe_queue_max": self.transcribe_in.maxsize,
+            "frames_dropped_backlog": 0,
+            "frames_silence_skipped": 0,
+            "rolling_buffer_max": self.max_buffer_size,
+            "last_event_ts": 0.0,
+            "last_match_ts": 0.0,
+            "last_alert_ts": 0.0,
+            "events_per_min": 0.0,
+            "events_per_5min": 0.0,
+            "p50_process": 0.0,
+            "p90_process": 0.0,
+            "p99_process": 0.0,
+            "p50_transcribe": 0.0,
+            "p90_transcribe": 0.0,
+            "p99_transcribe": 0.0,
+            "p50_ai": 0.0,
+            "p90_ai": 0.0,
+            "p99_ai": 0.0,
+            "last_t_process": 0.0,
+            "last_t_transcribe": 0.0,
+            "last_t_ai": 0.0,
         }
 
         # Internal accumulators for averages
@@ -106,6 +129,13 @@ class StreamProcessor:
         self._sum_process = 0.0
         self._count_events = 0
         self._count_ai_events = 0
+        # Rolling windows for percentiles and throughput
+        self._proc_samples = deque(maxlen=200)
+        self._asr_samples = deque(maxlen=200)
+        self._ai_samples = deque(maxlen=200)
+        self._event_times = deque(maxlen=600)  # store timestamps (epoch seconds)
+        self.frames_dropped_backlog = 0
+        self.frames_silence_skipped = 0
 
     def get_stats(self):  # todo, update with processing times
         stats = {
@@ -121,6 +151,9 @@ class StreamProcessor:
             "previous_texts_stored": len(self.previous_texts),
             "asr_backend": self.asr_backend,
             "previous_codewords": self._codeword_texts(),
+            "recent_codewords": [
+                {"word": cw, "ts": ts.isoformat()} for cw, ts in self.previous_codewords[-5:]
+            ],
         }
         # Merge stat dictionaries without mutating types that confuse the linter
         merged = {**stats, **self.stats}
@@ -199,6 +232,7 @@ class StreamProcessor:
             else ""
         )
         context = f"{prev_context} {text}".strip()
+        self.last_match_time = time.time()
         code_word = self.genAIHandler.generate(context, radio=self.radio_conf.get("NAME", ""))
         if code_word:
             # Skip duplicate code words to avoid repeat alerts/logs
@@ -257,8 +291,11 @@ class StreamProcessor:
                     # Optional RMS gate to skip near-silence frames
                     if self._rms_passes(buffer):
                         self.transcribe_in.put_nowait(buffer)
+                    else:
+                        self.frames_silence_skipped += 1
                 except queue.Full:
                     # Stop taking more frames this cycle if transcriber is backlogged; window has advanced
+                    self.frames_dropped_backlog += 1
                     break
 
             if not got_audio:
@@ -316,6 +353,7 @@ class StreamProcessor:
                             self.previous_texts = self.previous_texts[-self.MAX_MSG_STORAGE :]
 
                 t_process = time.time() - t0_post + t_transcribe
+                now = time.time()
                 self.stats["t_process"] = t_process
                 if t_process > self.stats["t_max_process"]:
                     self.stats["t_max_process"] = t_process
@@ -326,6 +364,8 @@ class StreamProcessor:
                 self.stats["t_match"] = t_match
                 self.stats["t_transcribe_in_len"] = self.transcribe_in.qsize()
                 self.stats["t_transcribe_out_len"] = self.transcribe_out.qsize()
+                self.stats["frames_dropped_backlog"] = self.frames_dropped_backlog
+                self.stats["frames_silence_skipped"] = self.frames_silence_skipped
 
                 # Update rolling sums and averages
                 self._count_events += 1
@@ -351,6 +391,34 @@ class StreamProcessor:
                     self.stats["avg_ai"] = (
                         self._sum_ai / self._count_ai_events if self._count_ai_events else 0.0
                     )
+                # Rolling percentiles and throughput
+                self._proc_samples.append(t_process)
+                self._asr_samples.append(t_transcribe)
+                if t_ai > 0:
+                    self._ai_samples.append(t_ai)
+                self._event_times.append(now)
+                while self._event_times and now - self._event_times[0] > 300:
+                    self._event_times.popleft()
+                per_min = len([t for t in self._event_times if now - t <= 60])
+                per_5min = len(self._event_times) / 5.0 if self._event_times else 0.0
+                self.stats["events_per_min"] = per_min
+                self.stats["events_per_5min"] = per_5min
+                self.stats["p50_process"] = float(np.percentile(self._proc_samples, 50)) if self._proc_samples else 0.0
+                self.stats["p90_process"] = float(np.percentile(self._proc_samples, 90)) if self._proc_samples else 0.0
+                self.stats["p99_process"] = float(np.percentile(self._proc_samples, 99)) if self._proc_samples else 0.0
+                self.stats["p50_transcribe"] = float(np.percentile(self._asr_samples, 50)) if self._asr_samples else 0.0
+                self.stats["p90_transcribe"] = float(np.percentile(self._asr_samples, 90)) if self._asr_samples else 0.0
+                self.stats["p99_transcribe"] = float(np.percentile(self._asr_samples, 99)) if self._asr_samples else 0.0
+                self.stats["p50_ai"] = float(np.percentile(self._ai_samples, 50)) if self._ai_samples else 0.0
+                self.stats["p90_ai"] = float(np.percentile(self._ai_samples, 90)) if self._ai_samples else 0.0
+                self.stats["p99_ai"] = float(np.percentile(self._ai_samples, 99)) if self._ai_samples else 0.0
+                self.stats["last_t_process"] = t_process
+                self.stats["last_t_transcribe"] = t_transcribe
+                self.stats["last_t_ai"] = t_ai
+                self.last_event_time = now
+                self.stats["last_event_ts"] = now
+                self.stats["last_match_ts"] = self.last_match_time
+                self.stats["last_alert_ts"] = self.last_alert_time
                 logging.debug(
                     f"{self.radio_conf.get('NAME','UNKNOWN')}: process_time={t_process:.2f}, transcribe_time={t_transcribe:.2f}, ai_time={t_ai:.2f}, match_time={t_match:.2f}, buffer_seconds = {self.buffer_seconds}"
                 )
