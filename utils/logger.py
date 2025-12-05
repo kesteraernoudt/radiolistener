@@ -82,9 +82,10 @@ def log_event(radio, msg):
 
 def log_ai_event(msg, radio=""):
     global ai_log
+    msg = msg.rstrip()
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     radio_tag = (radio or "GLOBAL").upper()
-    line = f"[{ts} - {radio_tag}] {msg}"
+    line = f"[{ts} - {radio_tag}] {msg}".rstrip()
     ai_log.append(line)
     if len(ai_log) > MAX_AI_LINES:
         ai_log = ai_log[-MAX_AI_LINES:]
@@ -224,11 +225,12 @@ def get_radio_ai_log(radio="", num_lines=100, start_datetime=None):
 
     # Add in-memory AI logs (these are the most recent, may overlap with latest log file)
     for line in ai_log:
-        if not matches_radio(line):
+        norm = line.rstrip()
+        if not matches_radio(norm):
             continue
-        if line not in seen_lines and _should_include(line, start_datetime):
-            seen_lines.add(line)
-            all_lines.append(line)
+        if norm not in seen_lines and _should_include(norm, start_datetime):
+            seen_lines.add(norm)
+            all_lines.append(norm)
 
     all_lines = _dedupe_preserve_order(all_lines)
 
