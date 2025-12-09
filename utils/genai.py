@@ -80,18 +80,31 @@ class GenAIHandler:
     def _generate_with_gemini(self, prompt: str, radio: str, max_output_tokens: int) -> tuple[str | None, bool]:
         if not self.gemini_client:
             return None, True  # allow fallback when Gemini is not configured
+        gen_config = {"max_output_tokens": min(max_output_tokens, 64)}
         try:
             response = self.gemini_client.models.generate_content(
                 model=self.GEMINI_MODEL,
                 contents=self.PRE_PROMPT + prompt,
-                generation_config={"max_output_tokens": min(max_output_tokens, 64)},
+                generation_config=gen_config,
             )
             text = getattr(response, "text", "") or ""
             return self._log_and_validate(text, radio), False
         except Exception as e:
+            # Older/alternate SDKs may not accept generation_config; retry without it
+            if isinstance(e, TypeError) and "generation_config" in str(e):
+                try:
+                    response = self.gemini_client.models.generate_content(
+                        model=self.GEMINI_MODEL,
+                        contents=self.PRE_PROMPT + prompt,
+                        config=gen_config,
+                    )
+                    text = getattr(response, "text", "") or ""
+                    return self._log_and_validate(text, radio), False
+                except Exception as inner_e:
+                    e = inner_e
             print(f"GenAIHandler generate error: {e}")
             logger.log_ai_event(f"GenAIHandler generate error: {e}", radio)
-            return None, self._is_rate_limit_error(e)
+            return None, True
 
     def _generate_with_groq(self, prompt: str, radio: str, max_output_tokens: int) -> str | None:
         if not self.groq_client:
@@ -112,7 +125,7 @@ class GenAIHandler:
                 temperature=0,
             )
             text = (response.choices[0].message.content or "").strip() if response and response.choices else ""
-            logger.log_ai_event("Using Groq fallback", radio)
+            logger.log_ai_event(f"Using Groq fallback (model={self.groq_model})", radio)
             return self._log_and_validate(text, radio)
         except Exception as e:
             print(f"Groq generate error: {e}")
@@ -142,6 +155,8 @@ class GenAIHandler:
         if text is not None:
             return text
         if fallback:
+            logger.log_ai_event("Falling back to Groq after Gemini issue", radio)
+            print("Gemini issue detected; falling back to Groq")
             return self._generate_with_groq(prompt, radio, max_output_tokens)
         return None
         

@@ -82,6 +82,8 @@ def main():
 
     print(f"Using provider={args.provider}, pre_prompt={'yes' if pre_prompt else 'no'}")
     result = handler.generate(args.prompt, radio=args.radio, max_output_tokens=args.max_tokens)
+    if args.verbose and handler.provider == "auto":
+        print("Auto provider flow complete (Gemini with Groq fallback if needed).")
     print(f"Result: {result!r}")
 
 
