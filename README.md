@@ -43,15 +43,21 @@ TELEGRAM_BOT_TOKEN="your-telegram-bot-token-here"
 # Telegram chat id where alerts are posted (integer or string)
 TELEGRAM_CHAT_ID=1234567890
 
-# API key for the generative AI (the code uses this as GEMINI_API_KEY)
+# API keys for the generative AI backends
 GEMINI_API_KEY="your-genai-or-gemini-api-key"
+GROQ_API_KEY="your-groq-api-key"
+AI_PROVIDER="auto"  # options: auto, gemini, groq
+# Optional: override Groq model (default: llama-3.2-11b-text-preview; fallback tries llama-3.2-90b-text-preview)
+# GROQ_MODEL="llama-3.2-11b-text-preview"
 
 ```
 
 Descriptions
 - `TELEGRAM_BOT_TOKEN`: Bot token obtained from BotFather (format: 123456:ABC-DEF...).
 - `TELEGRAM_CHAT_ID`: The chat (group or private) id to send messages/audio to. Use `@username` for channels or the numeric id for groups.
-- `GEMINI_API_KEY`: API key used by `utils/genai.py` to instantiate the GenAI client. Keep this secret.
+- `GEMINI_API_KEY`: API key used by `utils/genai.py` to instantiate the Gemini client. Keep this secret.
+- `GROQ_API_KEY`: Optional Groq key used as a fallback when Gemini is rate-limited. Keep this secret.
+- `AI_PROVIDER`: Set to `gemini` to force Gemini only, `groq` to force Groq only, or leave as `auto` (default) to use Gemini with Groq fallback.
 
 Running
 

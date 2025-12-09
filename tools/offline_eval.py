@@ -199,16 +199,27 @@ def run_offline_eval(
     asr_vad_filter: bool | None = None,
     asr_vad_min_silence_ms: int | None = None,
     asr_min_rms: float | None = None,
+    ai_provider: str | None = None,
 ):
     ctrl = OfflineController(name=os.path.basename(audio_path))
     base_config = load_base_config(config_path)
     genai_api_key = os.getenv("GEMINI_API_KEY") or base_config.get("GEMINI_API_KEY", "")
+    groq_api_key = (
+        os.getenv("GROQ_API_KEY")
+        or base_config.get("GROQ_API_KEY", "")
+    )
+    provider = (
+        ai_provider
+        or os.getenv("AI_PROVIDER")
+        or base_config.get("AI_PROVIDER", "auto")
+    )
 
-    if use_genai and genai_api_key:
+    if use_genai and (genai_api_key or groq_api_key):
         pre_prompt_file = resolve_pre_prompt(base_config, config_path)
     else:
         disable_genai()
         genai_api_key = ""
+        groq_api_key = ""
         pre_prompt_file = ""
 
     run_start = time.time()
@@ -235,6 +246,8 @@ def run_offline_eval(
         sample_rate=sample_rate,
         CLIP_DURATION=clip_duration,
         GENAI_API_KEY=genai_api_key,
+        GROQ_API_KEY=groq_api_key,
+        AI_PROVIDER=provider,
         pre_prompt_file=pre_prompt_file,
         controller=ctrl,
         log_enabled=False,
@@ -405,7 +418,12 @@ def parse_args():
     parser.add_argument(
         "--use-genai",
         action="store_true",
-        help="Use GenAIHandler with GEMINI_API_KEY (env) instead of stubbing it out",
+        help="Use GenAIHandler with GEMINI_API_KEY/GROQ_API_KEY env instead of stubbing it out",
+    )
+    parser.add_argument(
+        "--ai-provider",
+        choices=["auto", "gemini", "groq"],
+        help="Force AI provider (default: auto, Gemini with Groq fallback)",
     )
     parser.add_argument(
         "--timeout",
@@ -502,6 +520,7 @@ if __name__ == "__main__":
             realtime_feed=args.realtime_feed,
             verbose=args.verbose,
             idle_grace=args.idle_grace,
+            ai_provider=args.ai_provider,
             asr_backend=args.asr_backend,
             asr_device=args.asr_device,
             asr_compute_type=args.asr_compute,

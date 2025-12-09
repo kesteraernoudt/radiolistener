@@ -171,6 +171,8 @@ class RadioController:
             16000,
             self.CONFIG["CLIP_DURATION"],
             self.CONFIG["GEMINI_API_KEY"],
+            self.CONFIG.get("GROQ_API_KEY", ""),
+            self.CONFIG.get("AI_PROVIDER", "auto"),
             self.CONFIG["AI_PRE_PROMPT_FILE"],
             self,
             asr_backend=self.CONFIG.get("ASR_BACKEND", "whisper"),

@@ -42,6 +42,8 @@ class RadioListener:
         self.CONFIG["TELEGRAM_BOT_TOKEN"] = os.getenv("TELEGRAM_BOT_TOKEN")
         self.CONFIG["TELEGRAM_CHAT_ID"] = os.getenv("TELEGRAM_CHAT_ID")
         self.CONFIG["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
+        self.CONFIG["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY") or ""
+        self.CONFIG["AI_PROVIDER"] = os.getenv("AI_PROVIDER", self.CONFIG.get("AI_PROVIDER", "auto"))
         self.telegramBot = TelegramBot(self.CONFIG["TELEGRAM_BOT_TOKEN"], self)
         for radio_conf_path in self.CONFIG["RADIO_CONFIGS"]:
             radio_conf_path = os.path.join("config", radio_conf_path)

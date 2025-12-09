@@ -13,4 +13,5 @@ sentencepiece
 packaging
 python-telegram-bot[all]
 google-genai
+groq
 python-dotenv

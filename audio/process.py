@@ -24,6 +24,8 @@ class StreamProcessor:
         sample_rate: int = 16000,
         CLIP_DURATION: float = 10.0,
         GENAI_API_KEY: str = "",
+        GROQ_API_KEY: str = "",
+        AI_PROVIDER: str = "auto",
         pre_prompt_file: str = "",
         controller=None,
         log_enabled: bool = True,
@@ -63,7 +65,12 @@ class StreamProcessor:
         self.buffer_overlap = buffer_overlap
         self.sample_rate = sample_rate
         self.CLIP_DURATION = CLIP_DURATION
-        self.genAIHandler = genai.GenAIHandler(GENAI_API_KEY, pre_prompt_file)
+        self.genAIHandler = genai.GenAIHandler(
+            gemini_api_key=GENAI_API_KEY,
+            pre_prompt_file=pre_prompt_file,
+            groq_api_key=GROQ_API_KEY,
+            provider=AI_PROVIDER,
+        )
         self.controller = controller
 
         self.rolling_buffer = b""
