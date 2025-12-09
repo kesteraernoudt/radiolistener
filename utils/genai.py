@@ -62,6 +62,11 @@ class GenAIHandler:
         if not text:
             logger.log_ai_event("Empty AI response; skipping", radio)
             return None
+        normalized = text.strip().lower()
+        # Treat common "empty string" explanations as no-codeword
+        if "empty string" in normalized or "no code" in normalized or "no keyword" in normalized:
+            logger.log_ai_event("Interpreting model message as empty response", radio)
+            return ""
         # this should be a keyword or codeword or so, not a long response. So filter out any long reply
         if len(text) > 30:
             logger.log_ai_event("This is a way too long response to be a codeword, so skipping", radio)
@@ -78,7 +83,8 @@ class GenAIHandler:
         try:
             response = self.gemini_client.models.generate_content(
                 model=self.GEMINI_MODEL,
-                contents=self.PRE_PROMPT + prompt
+                contents=self.PRE_PROMPT + prompt,
+                generation_config={"max_output_tokens": min(max_output_tokens, 64)},
             )
             text = getattr(response, "text", "") or ""
             return self._log_and_validate(text, radio), False
@@ -96,8 +102,11 @@ class GenAIHandler:
         try:
             response = self.groq_client.chat.completions.create(
                 model=self.groq_model,
-                messages=[
-                    {"role": "user", "content": self.PRE_PROMPT + prompt},
+                messages=(
+                    [{"role": "system", "content": self.PRE_PROMPT}] if self.PRE_PROMPT else []
+                )
+                + [
+                    {"role": "user", "content": prompt},
                 ],
                 max_tokens=min(max_output_tokens, 64),
                 temperature=0,
