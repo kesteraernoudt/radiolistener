@@ -11,9 +11,10 @@ except ImportError:  # pragma: no cover - safety if dependency missing
 
 class GenAIHandler:
     GEMINI_MODEL = "gemini-2.5-flash"
-    GROQ_MODEL = "llama-3.3-70b-versatile"  # primary Groq model (override via env GROQ_MODEL)
+    GROQ_MODEL = "openai/gpt-oss-120b"  # primary Groq model (override via env GROQ_MODEL)
     GROQ_FALLBACKS = [
         "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile"
     ]
 
     def __init__(self, gemini_api_key: str = "", pre_prompt_file: str = "", groq_api_key: str = "", provider: str = "auto"):
