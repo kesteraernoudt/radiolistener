@@ -212,6 +212,27 @@
       max-width: 100%;
       height: auto;
     }
+
+    .collapsible-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .collapse-toggle {
+      border: 1px solid #ccc;
+      background: #f0f0f0;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .collapsed {
+      display: none;
+    }
   </style>
 </head>
 
@@ -242,146 +263,184 @@
     <div>
       <h3>Monitoring</h3>
       <div class="tab-buttons">
-        <button id="tab-logs-{{ radio.name }}" class="tab-button active" onclick="setActiveTab('{{ radio.name }}','logs')">Logs</button>
-        <button id="tab-ai-{{ radio.name }}" class="tab-button" onclick="setActiveTab('{{ radio.name }}','ai')">AI Logs</button>
-        <button id="tab-codewords-{{ radio.name }}" class="tab-button" onclick="setActiveTab('{{ radio.name }}','codewords')">Codewords</button>
+        <button id="tab-logs-{{ radio.name }}" class="tab-button active"
+          onclick="setActiveTab('{{ radio.name }}','logs')">Logs</button>
+        <button id="tab-ai-{{ radio.name }}" class="tab-button" onclick="setActiveTab('{{ radio.name }}','ai')">AI
+          Logs</button>
+        <button id="tab-codewords-{{ radio.name }}" class="tab-button"
+          onclick="setActiveTab('{{ radio.name }}','codewords')">Codewords</button>
       </div>
       <div class="tab-pane active" id="logs-pane-{{ radio.name }}">
         <div id="logbox-{{ radio.name }}" class="logbox">{{ radio.logs | join('\n') }}</div>
       </div>
       <div class="tab-pane" id="ai-pane-{{ radio.name }}">
-        <div id="ailogbox-{{ radio.name }}" class="logbox">{{ radio.ai_logs | join('\n') if radio.ai_logs else '' }}</div>
+        <div id="ailogbox-{{ radio.name }}" class="logbox">{{ radio.ai_logs | join('\n') if radio.ai_logs else '' }}
+        </div>
       </div>
       <div class="tab-pane" id="codewords-pane-{{ radio.name }}">
-        <div id="codewords-{{ radio.name }}" class="logbox">{{ (radio.stats.previous_codewords if radio.stats and radio.stats.get('previous_codewords') else []) | join('\n') }}</div>
+        <div id="codewords-{{ radio.name }}" class="logbox">{{ (radio.stats.previous_codewords if radio.stats and
+          radio.stats.get('previous_codewords') else []) | join('\n') }}</div>
       </div>
     </div>
     <div>
-      <h3>Realtime Performance</h3>
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-title">Process Latency</div>
-          <div class="stat-main" id="latency-process-last-{{ radio.name }}">--</div>
-          <div class="stat-sub">
-            p50 <span id="latency-process-p50-{{ radio.name }}">--</span> ·
-            p90 <span id="latency-process-p90-{{ radio.name }}">--</span> ·
-            p99 <span id="latency-process-p99-{{ radio.name }}">--</span>
+      <div class="collapsible-header" onclick="toggleSection('{{ radio.name }}','realtime')">
+        <button class="collapse-toggle" id="toggle-realtime-{{ radio.name }}">Hide</button>
+        <h3 style="margin: 0;">Realtime Performance</h3>
+      </div>
+      <div id="section-realtime-{{ radio.name }}">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-title">Process Latency</div>
+            <div class="stat-main" id="latency-process-last-{{ radio.name }}">--</div>
+            <div class="stat-sub">
+              p50 <span id="latency-process-p50-{{ radio.name }}">--</span> ·
+              p90 <span id="latency-process-p90-{{ radio.name }}">--</span> ·
+              p99 <span id="latency-process-p99-{{ radio.name }}">--</span>
+            </div>
           </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-title">ASR Latency</div>
-          <div class="stat-main" id="latency-asr-last-{{ radio.name }}">--</div>
-          <div class="stat-sub">
-            p50 <span id="latency-asr-p50-{{ radio.name }}">--</span> ·
-            p90 <span id="latency-asr-p90-{{ radio.name }}">--</span> ·
-            p99 <span id="latency-asr-p99-{{ radio.name }}">--</span>
+          <div class="stat-card">
+            <div class="stat-title">ASR Latency</div>
+            <div class="stat-main" id="latency-asr-last-{{ radio.name }}">--</div>
+            <div class="stat-sub">
+              p50 <span id="latency-asr-p50-{{ radio.name }}">--</span> ·
+              p90 <span id="latency-asr-p90-{{ radio.name }}">--</span> ·
+              p99 <span id="latency-asr-p99-{{ radio.name }}">--</span>
+            </div>
           </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-title">AI Latency</div>
-          <div class="stat-main" id="latency-ai-last-{{ radio.name }}">--</div>
-          <div class="stat-sub">
-            p50 <span id="latency-ai-p50-{{ radio.name }}">--</span> ·
-            p90 <span id="latency-ai-p90-{{ radio.name }}">--</span> ·
-            p99 <span id="latency-ai-p99-{{ radio.name }}">--</span>
+          <div class="stat-card">
+            <div class="stat-title">AI Latency</div>
+            <div class="stat-main" id="latency-ai-last-{{ radio.name }}">--</div>
+            <div class="stat-sub">
+              p50 <span id="latency-ai-p50-{{ radio.name }}">--</span> ·
+              p90 <span id="latency-ai-p90-{{ radio.name }}">--</span> ·
+              p99 <span id="latency-ai-p99-{{ radio.name }}">--</span>
+            </div>
           </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-title">Backlog & Drops</div>
-          <div class="stat-main" id="queue-usage-{{ radio.name }}">--</div>
-          <div class="progress"><div class="progress-bar" id="queue-bar-{{ radio.name }}"></div></div>
-          <div class="stat-sub" id="frames-dropped-{{ radio.name }}">--</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-title">Throughput & Freshness</div>
-          <div class="stat-main" id="events-per-min-{{ radio.name }}">--</div>
-          <div class="stat-sub">
-            5m avg <span id="events-per-5min-{{ radio.name }}">--</span><br>
-            Last event <span id="last-event-ago-{{ radio.name }}">--</span><br>
-            Last match <span id="last-match-ago-{{ radio.name }}">--</span><br>
-            Last alert <span id="last-alert-ago-{{ radio.name }}">--</span>
+          <div class="stat-card">
+            <div class="stat-title">Backlog & Drops</div>
+            <div class="stat-main" id="queue-usage-{{ radio.name }}">--</div>
+            <div class="progress">
+              <div class="progress-bar" id="queue-bar-{{ radio.name }}"></div>
+            </div>
+            <div class="stat-sub" id="frames-dropped-{{ radio.name }}">--</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Throughput & Freshness</div>
+            <div class="stat-main" id="events-per-min-{{ radio.name }}">--</div>
+            <div class="stat-sub">
+              5m avg <span id="events-per-5min-{{ radio.name }}">--</span><br>
+              Last event <span id="last-event-ago-{{ radio.name }}">--</span><br>
+              Last match <span id="last-match-ago-{{ radio.name }}">--</span><br>
+              Last alert <span id="last-alert-ago-{{ radio.name }}">--</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
     <div>
-      <h3>Radio Stats</h3>
-      <textarea id="radio_stats_{{ radio.name }}">{{ radio.stats | tojson(indent = 2) }}</textarea><br>
+      <div class="collapsible-header" onclick="toggleSection('{{ radio.name }}','stats')">
+        <button class="collapse-toggle" id="toggle-stats-{{ radio.name }}">Show</button>
+        <h3 style="margin: 0;">Radio Stats</h3>
+      </div>
+      <div id="section-stats-{{ radio.name }}" class="collapsed">
+        <textarea id="radio_stats_{{ radio.name }}">{{ radio.stats | tojson(indent = 2) }}</textarea><br>
+      </div>
     </div>
     <div>
-      <h3>Performance Dashboard</h3>
-      <div id="dashboard-{{ radio.name }}" class="dashboard-container">
-        <div class="dashboard-grid">
-          <!-- Performance Timeline Chart -->
-          <div class="chart-container">
-            <h4>Processing Times Timeline</h4>
-            <canvas id="timeline-chart-{{ radio.name }}" width="400" height="200"></canvas>
-          </div>
+      <div class="collapsible-header" onclick="toggleSection('{{ radio.name }}','dashboard')">
+        <button class="collapse-toggle" id="toggle-dashboard-{{ radio.name }}">Show</button>
+        <h3 style="margin: 0;">Performance Dashboard</h3>
+      </div>
+      <div id="section-dashboard-{{ radio.name }}" class="collapsed">
+        <div id="dashboard-{{ radio.name }}" class="dashboard-container">
+          <div class="dashboard-grid">
+            <!-- Performance Timeline Chart -->
+            <div class="chart-container">
+              <h4>Processing Times Timeline</h4>
+              <canvas id="timeline-chart-{{ radio.name }}" width="400" height="200"></canvas>
+            </div>
 
-          <!-- Queue Health Gauge -->
-          <!-- 
+            <!-- Queue Health Gauge -->
+            <!-- 
           <div class="chart-container">
             <h4>Transcription Queue Health</h4>
             <canvas id="queue-gauge-{{ radio.name }}" width="200" height="200"></canvas>
           </div>
           -->
 
-          <!-- AI Activity Heatmap -->
-          <div class="chart-container">
-            <h4>AI Activity Heatmap</h4>
-            <canvas id="ai-heatmap-{{ radio.name }}" width="400" height="200"></canvas>
-          </div>
-
-          <!-- Processing Rate Counter -->
-          <div class="chart-container">
-            <h4>Processing Rate</h4>
-            <div id="rate-counter-{{ radio.name }}" class="rate-counter">
-              <div class="rate-number">0</div>
-              <div class="rate-label">events/min</div>
+            <!-- AI Activity Heatmap -->
+            <div class="chart-container">
+              <h4>AI Activity Heatmap</h4>
+              <canvas id="ai-heatmap-{{ radio.name }}" width="400" height="200"></canvas>
             </div>
-          </div>
 
-          <!-- Rolling Averages Display -->
-          <div class="averages-container">
-            <h4>Rolling Averages</h4>
-            <div class="averages-grid">
-              <div class="avg-card">
-                <div class="avg-label">Transcribe</div>
-                <div class="avg-value" id="avg-transcribe-{{ radio.name }}">0ms</div>
+            <!-- Processing Rate Counter -->
+            <div class="chart-container">
+              <h4>Processing Rate</h4>
+              <div id="rate-counter-{{ radio.name }}" class="rate-counter">
+                <div class="rate-number">0</div>
+                <div class="rate-label">events/min</div>
               </div>
-              <div class="avg-card">
-                <div class="avg-label">AI</div>
-                <div class="avg-value" id="avg-ai-{{ radio.name }}">0ms</div>
-              </div>
-              <div class="avg-card">
-                <div class="avg-label">Match</div>
-                <div class="avg-value" id="avg-match-{{ radio.name }}">0ms</div>
-              </div>
-              <div class="avg-card">
-                <div class="avg-label">Process</div>
-                <div class="avg-value" id="avg-process-{{ radio.name }}">0ms</div>
+            </div>
+
+            <!-- Rolling Averages Display -->
+            <div class="averages-container">
+              <h4>Rolling Averages</h4>
+              <div class="averages-grid">
+                <div class="avg-card">
+                  <div class="avg-label">Transcribe</div>
+                  <div class="avg-value" id="avg-transcribe-{{ radio.name }}">0ms</div>
+                </div>
+                <div class="avg-card">
+                  <div class="avg-label">AI</div>
+                  <div class="avg-value" id="avg-ai-{{ radio.name }}">0ms</div>
+                </div>
+                <div class="avg-card">
+                  <div class="avg-label">Match</div>
+                  <div class="avg-value" id="avg-match-{{ radio.name }}">0ms</div>
+                </div>
+                <div class="avg-card">
+                  <div class="avg-label">Process</div>
+                  <div class="avg-value" id="avg-process-{{ radio.name }}">0ms</div>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+      <div>
+        <div class="collapsible-header" onclick="toggleSection('{{ radio.name }}','config')">
+          <button class="collapse-toggle" id="toggle-config-{{ radio.name }}">Show</button>
+          <h3 style="margin: 0;">Radio Config</h3>
+        </div>
+        <div id="section-config-{{ radio.name }}" class="collapsed">
+          <textarea id="radio_conf_{{ radio.name }}">{{ radio.conf | tojson(indent = 2) }}</textarea><br>
+          <button onclick="saveRadioConf('{{ radio.name }}')">Save Radio Config</button>
+        </div>
+      </div>
+      <div>
+        <div class="collapsible-header" onclick="toggleSection('{{ radio.name }}','phrases')">
+          <button class="collapse-toggle" id="toggle-phrases-{{ radio.name }}">Show</button>
+          <h3 style="margin: 0;">Phrases</h3>
+        </div>
+        <div id="section-phrases-{{ radio.name }}" class="collapsed">
+          <div id="phrases-list-{{ radio.name }}"></div>
+          <button onclick="addPhrase('{{ radio.name }}')">Add Phrase</button>
+          <button onclick="savePhrases('{{ radio.name }}')">Save Phrases</button>
+        </div>
+      </div>
+      <div>
+        <div class="collapsible-header" onclick="toggleSection('{{ radio.name }}','control')">
+          <button class="collapse-toggle" id="toggle-control-{{ radio.name }}">Show</button>
+          <h3 style="margin: 0;">Control</h3>
+        </div>
+        <div id="section-control-{{ radio.name }}" class="collapsed">
+          <button onclick="saveClip('{{ radio.name }}')">Save Clip</button>
+          <button onclick="restartRadio('{{ radio.name }}')">Restart</button>
+        </div>
+      </div>
     </div>
-    <div>
-      <h3>Radio Config</h3>
-      <textarea id="radio_conf_{{ radio.name }}">{{ radio.conf | tojson(indent = 2) }}</textarea><br>
-      <button onclick="saveRadioConf('{{ radio.name }}')">Save Radio Config</button>
-    </div>
-    <div>
-      <h3>Phrases</h3>
-      <div id="phrases-list-{{ radio.name }}"></div>
-      <button onclick="addPhrase('{{ radio.name }}')">Add Phrase</button>
-      <button onclick="savePhrases('{{ radio.name }}')">Save Phrases</button>
-    </div>
-    <div>
-      <h3>Control</h3>
-      <button onclick="saveClip('{{ radio.name }}')">Save Clip</button>
-      <button onclick="restartRadio('{{ radio.name }}')">Restart</button>
-    </div>
+  </div>
   </div>
   {% endfor %}
 
@@ -897,6 +956,15 @@
         }, 2000); // Update every 2 seconds
       });
     });
+
+    function toggleSection(name, section) {
+      const content = document.getElementById(`section-${section}-${name}`);
+      const toggle = document.getElementById(`toggle-${section}-${name}`);
+      if (!content || !toggle) return;
+      const isCollapsed = content.classList.contains("collapsed");
+      content.classList.toggle("collapsed", !isCollapsed);
+      toggle.textContent = isCollapsed ? "Hide" : "Show";
+    }
 
     /*
     window.onload = function () {
