@@ -1,20 +1,24 @@
 {
-    "NAME": "ALT94.7",
-    "PHRASES": [
-        {
-            "mode": "regex",
-            "text": "text (now|immediately)"
-        },
-        {
-            "mode": "contains",
-            "text": "disney"
-        },
-        {
-            "mode": "contains",
-            "text": "code word"
-        }
-    ],
-    "STREAM_URL": "https://prod-3-239-183-60.amperwave.net/audacy-kkdofmaac-hlsc.m3u8",
-    "URL": "https://www.audacy.com/alt947/contests/aftershock-4-day-passes",
-    "SMS_NUMBER": "916-909-0947"
+  "NAME": "ALT94.7",
+  "PHRASES": [
+    {
+      "mode": "regex",
+      "text": "text (now|immediately)"
+    },
+    {
+      "mode": "contains",
+      "text": "disney"
+    },
+    {
+      "mode": "contains",
+      "text": "code word"
+    },
+    {
+      "text": "aftershock",
+      "mode": "contains"
+    }
+  ],
+  "SMS_NUMBER": "916-909-0947",
+  "STREAM_URL": "https://prod-3-239-183-60.amperwave.net/audacy-kkdofmaac-hlsc.m3u8",
+  "URL": "https://www.audacy.com/alt947/contests/aftershock-4-day-passes"
 }

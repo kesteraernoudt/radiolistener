@@ -11,6 +11,9 @@ except ImportError:  # pragma: no cover - safety if dependency missing
 
 class GenAIHandler:
     GEMINI_MODEL = "gemini-2.5-flash"
+    GEMINI_FALLBACKS = [ 
+        "gemini-2.5-flash-lite"
+    ]
     GROQ_MODEL = "openai/gpt-oss-120b"  # primary Groq model (override via env GROQ_MODEL)
     GROQ_FALLBACKS = [
         "llama-3.1-8b-instant",
@@ -21,6 +24,15 @@ class GenAIHandler:
         self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY", "")
         self.groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY", "")
         self.gemini_client = genai.Client(api_key=self.gemini_api_key) if self.gemini_api_key else None
+        gemini_env_model = os.getenv("GEMINI_MODEL", "").strip()
+        self.gemini_model = gemini_env_model or self.GEMINI_MODEL
+        gemini_fallback_env = os.getenv("GEMINI_FALLBACKS", "")
+        configured_gemini_fallbacks = (
+            [m.strip() for m in gemini_fallback_env.split(",") if m.strip()]
+            if gemini_fallback_env
+            else list(self.GEMINI_FALLBACKS)
+        )
+        self._gemini_fallbacks = [m for m in configured_gemini_fallbacks if m and m != self.gemini_model]
         env_model = os.getenv("GROQ_MODEL", "").strip()
         self.groq_model = env_model or self.GROQ_MODEL
         self._groq_fallbacks = list(self.GROQ_FALLBACKS)
@@ -78,34 +90,71 @@ class GenAIHandler:
         message = str(error).upper()
         return "RESOURCE_EXHAUSTED" in message or "429" in message or "RATE LIMIT" in message
 
+    def _should_switch_gemini_model(self, error: Exception) -> bool:
+        if self._is_rate_limit_error(error):
+            return True
+        message = str(error).lower()
+        return any(
+            token in message
+            for token in (
+                "model_not_found",
+                "model not found",
+                "unsupported model",
+                "permission",
+                "forbidden",
+                "not enabled",
+            )
+        )
+
+    def _update_gemini_model(self, new_model: str):
+        """Keep the active Gemini model and rotate previous into the fallback list."""
+        previous = getattr(self, "gemini_model", "")
+        if previous and previous != new_model and previous not in self._gemini_fallbacks:
+            self._gemini_fallbacks.append(previous)
+        self.gemini_model = new_model
+        self._gemini_fallbacks = [m for m in self._gemini_fallbacks if m != new_model]
+
     def _generate_with_gemini(self, prompt: str, radio: str, max_output_tokens: int) -> tuple[str | None, bool]:
         if not self.gemini_client:
             return None, True  # allow fallback when Gemini is not configured
         gen_config = {"max_output_tokens": min(max_output_tokens, 64)}
-        try:
-            response = self.gemini_client.models.generate_content(
-                model=self.GEMINI_MODEL,
-                contents=self.PRE_PROMPT + prompt,
-                generation_config=gen_config,
-            )
+        models_to_try = [self.gemini_model] + [m for m in self._gemini_fallbacks if m != self.gemini_model]
+        for idx, model_name in enumerate(models_to_try):
+            response = None
+            try:
+                response = self.gemini_client.models.generate_content(
+                    model=model_name,
+                    contents=self.PRE_PROMPT + prompt,
+                    generation_config=gen_config,
+                )
+            except Exception as e:
+                # Older/alternate SDKs may not accept generation_config; retry without it
+                if isinstance(e, TypeError) and "generation_config" in str(e):
+                    try:
+                        response = self.gemini_client.models.generate_content(
+                            model=model_name,
+                            contents=self.PRE_PROMPT + prompt,
+                            config=gen_config,
+                        )
+                    except Exception as inner_e:
+                        e = inner_e
+                        response = None
+                if response is None:
+                    print(f"GenAIHandler generate error (model={model_name}): {e}")
+                    logger.log_ai_event(f"GenAIHandler generate error (model={model_name}): {e}", radio)
+                    if self._should_switch_gemini_model(e) and idx < len(models_to_try) - 1:
+                        next_model = models_to_try[idx + 1]
+                        logger.log_ai_event(f"Switching Gemini model to fallback {next_model}", radio)
+                        print(f"Switching Gemini model to fallback {next_model}")
+                        continue
+                    return None, True
             text = getattr(response, "text", "") or ""
+            if model_name != self.gemini_model:
+                logger.log_ai_event(f"Using Gemini fallback (model={model_name})", radio)
+                print(f"Using Gemini fallback model {model_name}")
+            self._update_gemini_model(model_name)
             return self._log_and_validate(text, radio), False
-        except Exception as e:
-            # Older/alternate SDKs may not accept generation_config; retry without it
-            if isinstance(e, TypeError) and "generation_config" in str(e):
-                try:
-                    response = self.gemini_client.models.generate_content(
-                        model=self.GEMINI_MODEL,
-                        contents=self.PRE_PROMPT + prompt,
-                        config=gen_config,
-                    )
-                    text = getattr(response, "text", "") or ""
-                    return self._log_and_validate(text, radio), False
-                except Exception as inner_e:
-                    e = inner_e
-            print(f"GenAIHandler generate error: {e}")
-            logger.log_ai_event(f"GenAIHandler generate error: {e}", radio)
-            return None, True
+        return None, True
 
     def _generate_with_groq(self, prompt: str, radio: str, max_output_tokens: int) -> str | None:
         if not self.groq_client:
@@ -113,19 +162,26 @@ class GenAIHandler:
             reason = self.groq_client_error or "unknown reason"
             print(f"Groq client not configured; skipping Groq call. Reason: {reason}")
             return None
-        try:
-            response = self.groq_client.chat.completions.create(
-                model=self.groq_model,
-                messages=(
-                    [{"role": "system", "content": self.PRE_PROMPT}] if self.PRE_PROMPT else []
-                )
-                + [
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=min(max_output_tokens, 64),
-                temperature=0,
+        params = {
+            "model": self.groq_model,
+            "messages": (
+                [{"role": "system", "content": self.PRE_PROMPT}] if self.PRE_PROMPT else []
             )
+            + [
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+        }
+        params["max_tokens"] = min(max_output_tokens, 64)
+
+        try:
+            response = self.groq_client.chat.completions.create(**params)
             text = (response.choices[0].message.content or "").strip() if response and response.choices else ""
+            if not text and self._groq_fallbacks:
+                next_model = self._groq_fallbacks.pop(0)
+                logger.log_ai_event(f"Groq returned empty response; switching model to {next_model}", radio)
+                self.groq_model = next_model
+                return self._generate_with_groq(prompt, radio, max_output_tokens)
             logger.log_ai_event(f"Using Groq fallback (model={self.groq_model})", radio)
             return self._log_and_validate(text, radio)
         except Exception as e:
@@ -160,7 +216,7 @@ class GenAIHandler:
             print("Gemini issue detected; falling back to Groq")
             return self._generate_with_groq(prompt, radio, max_output_tokens)
         return None
-        
+
 if __name__ == "__main__":
     genai_handler = GenAIHandler(gemini_api_key="MY_API_KEY")
     test_prompt = "Detects that to us right now. You couldn't win a family four pack to six flags great America. Grizzly 408 516 1065 We got all Navy get 50 percent"

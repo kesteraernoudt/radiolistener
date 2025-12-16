@@ -74,8 +74,10 @@ def main():
         groq_client = getattr(handler, "groq_client", None)
         gemini_client = getattr(handler, "gemini_client", None)
         groq_model = getattr(handler, "groq_model", "")
+        gemini_model = getattr(handler, "gemini_model", "")
         remaining_fallbacks = getattr(handler, "_groq_fallbacks", [])
-        print(f"Handler provider={handler.provider}, groq_client={'yes' if groq_client else 'no'} (model={groq_model or 'n/a'}, fallbacks={remaining_fallbacks}), gemini_client={'yes' if gemini_client else 'no'}")
+        gemini_fallbacks = getattr(handler, "_gemini_fallbacks", [])
+        print(f"Handler provider={handler.provider}, groq_client={'yes' if groq_client else 'no'} (model={groq_model or 'n/a'}, fallbacks={remaining_fallbacks}), gemini_client={'yes' if gemini_client else 'no'} (model={gemini_model or 'n/a'}, fallbacks={gemini_fallbacks})")
         if not groq_client:
             reason = getattr(handler, "groq_client_error", "")
             print(f"Groq client not configured because: {reason or 'unknown'}")
