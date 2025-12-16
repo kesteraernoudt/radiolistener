@@ -12,8 +12,6 @@ except ImportError:  # pragma: no cover - safety if dependency missing
 class GenAIHandler:
     GEMINI_MODEL = "gemini-2.5-flash"
     GEMINI_FALLBACKS = [ 
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
         "gemini-2.0-flash-lite"
     ]
     GROQ_MODEL = "openai/gpt-oss-120b"  # primary Groq model (override via env GROQ_MODEL)
@@ -77,6 +75,10 @@ class GenAIHandler:
         trimmed = text.strip() if text else ""
         if not trimmed:
             logger.log_ai_event("Empty or whitespace AI response; skipping", radio)
+            return None
+        # Drop obvious empty wrappers
+        if trimmed in {"''", '""', "``", "()", "[]", "{}", "\"", "'"}:
+            logger.log_ai_event("Only punctuation/quotes returned; treating as empty", radio)
             return None
         normalized = trimmed.lower()
         # Treat common "empty string" explanations as no-codeword
@@ -165,14 +167,17 @@ class GenAIHandler:
             reason = self.groq_client_error or "unknown reason"
             print(f"Groq client not configured; skipping Groq call. Reason: {reason}")
             return None
+        messages = (
+            [{"role": "system", "content": self.PRE_PROMPT}] if self.PRE_PROMPT else []
+        ) + [
+            {"role": "user", "content": prompt},
+            # Few-shot the empty-response expectation to reduce false positives (matches playground pattern)
+            {"role": "assistant", "content": ""},
+            {"role": "user", "content": ""},
+        ]
         params = {
             "model": self.groq_model,
-            "messages": (
-                [{"role": "system", "content": self.PRE_PROMPT}] if self.PRE_PROMPT else []
-            )
-            + [
-                {"role": "user", "content": prompt},
-            ],
+            "messages": messages,
             "temperature": 0,
         }
         params["max_tokens"] = min(max_output_tokens, 64)
