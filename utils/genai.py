@@ -12,7 +12,9 @@ except ImportError:  # pragma: no cover - safety if dependency missing
 class GenAIHandler:
     GEMINI_MODEL = "gemini-2.5-flash"
     GEMINI_FALLBACKS = [ 
-        "gemini-2.5-flash-lite"
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite"
     ]
     GROQ_MODEL = "openai/gpt-oss-120b"  # primary Groq model (override via env GROQ_MODEL)
     GROQ_FALLBACKS = [
@@ -72,19 +74,20 @@ class GenAIHandler:
 
     def _log_and_validate(self, text: str, radio: str = "") -> str | None:
         logger.log_ai_event(f"Response: {text}", radio)
-        if not text:
-            logger.log_ai_event("Empty AI response; skipping", radio)
+        trimmed = text.strip() if text else ""
+        if not trimmed:
+            logger.log_ai_event("Empty or whitespace AI response; skipping", radio)
             return None
-        normalized = text.strip().lower()
+        normalized = trimmed.lower()
         # Treat common "empty string" explanations as no-codeword
         if "empty string" in normalized or "no code" in normalized or "no keyword" in normalized:
             logger.log_ai_event("Interpreting model message as empty response", radio)
             return ""
         # this should be a keyword or codeword or so, not a long response. So filter out any long reply
-        if len(text) > 30:
+        if len(trimmed) > 30:
             logger.log_ai_event("This is a way too long response to be a codeword, so skipping", radio)
             return None
-        return text
+        return trimmed
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         message = str(error).upper()
