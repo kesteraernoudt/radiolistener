@@ -1,4 +1,5 @@
 import os
+import time
 
 import google.genai as genai
 from utils import logger
@@ -7,6 +8,11 @@ try:
     from groq import Groq
 except ImportError:  # pragma: no cover - safety if dependency missing
     Groq = None
+
+try:
+    from mistralai import Mistral
+except ImportError:  # pragma: no cover - safety if dependency missing
+    Mistral = None
 
 
 class GenAIHandler:
@@ -19,10 +25,24 @@ class GenAIHandler:
         "llama-3.1-8b-instant",
         "llama-3.3-70b-versatile"
     ]
+    MISTRAL_MODEL = "mistral-large-latest"
+    MISTRAL_FALLBACKS = [
+        "mistral-small-latest",
+        "open-mixtral-8x7b",
+    ]
+    COOLDOWN_SECONDS = 3600  # one hour backoff after 429/rate limit
 
-    def __init__(self, gemini_api_key: str = "", pre_prompt_file: str = "", groq_api_key: str = "", provider: str = "auto"):
+    def __init__(
+        self,
+        gemini_api_key: str = "",
+        pre_prompt_file: str = "",
+        groq_api_key: str = "",
+        mistral_api_key: str = "",
+        provider: str = "auto",
+    ):
         self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY", "")
         self.groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY", "")
+        self.mistral_api_key = mistral_api_key or os.getenv("MISTRAL_API_KEY", "")
         self.gemini_client = genai.Client(api_key=self.gemini_api_key) if self.gemini_api_key else None
         gemini_env_model = os.getenv("GEMINI_MODEL", "").strip()
         self.gemini_model = gemini_env_model or self.GEMINI_MODEL
@@ -50,12 +70,39 @@ class GenAIHandler:
         else:
             self.groq_client = None
             self.groq_client_error = "No Groq API key provided."
+        mistral_env_model = os.getenv("MISTRAL_MODEL", "").strip()
+        self.mistral_model = mistral_env_model or self.MISTRAL_MODEL
+        mistral_fallback_env = os.getenv("MISTRAL_FALLBACKS", "")
+        configured_mistral_fallbacks = (
+            [m.strip() for m in mistral_fallback_env.split(",") if m.strip()]
+            if mistral_fallback_env
+            else list(self.MISTRAL_FALLBACKS)
+        )
+        self._mistral_fallbacks = [m for m in configured_mistral_fallbacks if m and m != self.mistral_model]
+        self.mistral_client_error = ""
+        if self.mistral_api_key:
+            if Mistral is None:
+                self.mistral_client = None
+                self.mistral_client_error = "mistralai SDK missing; install/upgrade via `pip install -U mistralai`"
+            else:
+                try:
+                    self.mistral_client = Mistral(api_key=self.mistral_api_key)
+                except Exception as exc:  # pragma: no cover - defensive
+                    self.mistral_client = None
+                    self.mistral_client_error = f"Failed to init Mistral client: {exc}"
+        else:
+            self.mistral_client = None
+            self.mistral_client_error = "No Mistral API key provided."
         provider = (provider or "auto").lower()
-        self.provider = provider if provider in ("auto", "gemini", "groq") else "auto"
+        self.provider = provider if provider in ("auto", "gemini", "groq", "mistral") else "auto"
         self.pre_prompt_file = pre_prompt_file
         self._pre_prompt_mtime = None
         self.PRE_PROMPT = ""
+        self.last_provider = ""
+        self.last_model = ""
+        self._model_cooldowns = {}
         self._load_pre_prompt()
+        self._init_model_cooldowns()
 
     def _load_pre_prompt(self):
         if self.pre_prompt_file and os.path.exists(self.pre_prompt_file):
@@ -70,26 +117,53 @@ class GenAIHandler:
             if mtime != self._pre_prompt_mtime:
                 self._load_pre_prompt()
 
-    def _log_and_validate(self, text: str, radio: str = "") -> str | None:
+    def _init_model_cooldowns(self):
+        all_models = set()
+        all_models.add(self.gemini_model)
+        all_models.update(self._gemini_fallbacks)
+        all_models.add(self.groq_model)
+        all_models.update(self._groq_fallbacks)
+        all_models.add(self.mistral_model)
+        all_models.update(self._mistral_fallbacks)
+        for model in all_models:
+            self._model_cooldowns[model] = 0.0
+
+    def _model_in_cooldown(self, model: str) -> bool:
+        until = self._model_cooldowns.get(model, 0.0)
+        return until and time.time() < until
+
+    def _set_model_cooldown(self, provider: str, model: str, radio: str, reason: str):
+        self._model_cooldowns[model] = time.time() + self.COOLDOWN_SECONDS
+        logger.log_ai_event(
+            f"{provider} model {model} hit rate limit; cooling down for {self.COOLDOWN_SECONDS} seconds (reason: {reason})",
+            radio,
+        )
+        print(f"{provider} model {model} entered cooldown for {self.COOLDOWN_SECONDS}s because: {reason}")
+
+    def _log_and_validate(self, text: str, radio: str = "") -> tuple[str | None, str | None]:
         logger.log_ai_event(f"Response: {text}", radio)
         trimmed = text.strip() if text else ""
         if not trimmed:
-            logger.log_ai_event("Empty or whitespace AI response; skipping", radio)
-            return None
+            reason = "Empty or whitespace AI response; treating as no codeword"
+            logger.log_ai_event(reason, radio)
+            return "", None
         # Drop obvious empty wrappers
-        if trimmed in {"''", '""', "``", "()", "[]", "{}", "\"", "'"}:
-            logger.log_ai_event("Only punctuation/quotes returned; treating as empty", radio)
-            return None
+        if trimmed in {"''", '\"\"', "``", "()", "[]", "{}", "\"", "'"}:
+            reason = "Only punctuation/quotes returned; treating as no codeword"
+            logger.log_ai_event(reason, radio)
+            return "", None
         normalized = trimmed.lower()
         # Treat common "empty string" explanations as no-codeword
         if "empty string" in normalized or "no code" in normalized or "no keyword" in normalized:
-            logger.log_ai_event("Interpreting model message as empty response", radio)
-            return ""
+            reason = "Interpreting model message as empty response"
+            logger.log_ai_event(reason, radio)
+            return "", None
         # this should be a keyword or codeword or so, not a long response. So filter out any long reply
         if len(trimmed) > 30:
-            logger.log_ai_event("This is a way too long response to be a codeword, so skipping", radio)
-            return None
-        return trimmed
+            reason = "Response too long to be a codeword; skipping"
+            logger.log_ai_event(reason, radio)
+            return None, reason
+        return trimmed, None
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         message = str(error).upper()
@@ -99,45 +173,58 @@ class GenAIHandler:
         if self._is_rate_limit_error(error):
             return True
         message = str(error).lower()
-        return any(
-            token in message
-            for token in (
-                "model_not_found",
-                "model not found",
-                "unsupported model",
-                "permission",
-                "forbidden",
-                "not enabled",
-            )
+        return any(token in message for token in self._model_not_found_tokens())
+
+    @staticmethod
+    def _model_not_found_tokens():
+        return (
+            "model_not_found",
+            "model not found",
+            "unsupported model",
+            "permission",
+            "forbidden",
+            "not enabled",
+            "decommissioned",
+            "no longer supported",
         )
 
-    def _update_gemini_model(self, new_model: str):
-        """Keep the active Gemini model and rotate previous into the fallback list."""
-        previous = getattr(self, "gemini_model", "")
-        if previous and previous != new_model and previous not in self._gemini_fallbacks:
-            self._gemini_fallbacks.append(previous)
-        self.gemini_model = new_model
-        self._gemini_fallbacks = [m for m in self._gemini_fallbacks if m != new_model]
+    def _provider_models(self, provider: str) -> list[str]:
+        if provider == "gemini":
+            return [self.gemini_model] + [m for m in self._gemini_fallbacks if m]
+        if provider == "mistral":
+            return [self.mistral_model] + [m for m in self._mistral_fallbacks if m]
+        if provider == "groq":
+            return [self.groq_model] + [m for m in self._groq_fallbacks if m]
+        return []
 
-    def _generate_with_gemini(self, prompt: str, radio: str, max_output_tokens: int) -> tuple[str | None, bool]:
-        if not self.gemini_client:
-            return None, True  # allow fallback when Gemini is not configured
-        gen_config = {"max_output_tokens": min(max_output_tokens, 64)}
-        models_to_try = [self.gemini_model] + [m for m in self._gemini_fallbacks if m != self.gemini_model]
-        for idx, model_name in enumerate(models_to_try):
-            response = None
+    def _record_model_usage(self, provider: str, model: str, radio: str):
+        """Persist the last successful provider/model and emit a log line."""
+        self.last_provider = (provider or "").lower()
+        self.last_model = model or ""
+        provider_label = self.last_provider or "unknown"
+        model_label = self.last_model or "unknown"
+        logger.log_ai_event(f"AI choice: provider={provider_label}, model={model_label}", radio)
+
+    def _call_model(self, provider: str, model: str, prompt: str, radio: str, max_output_tokens: int) -> tuple[str | None, str | None]:
+        """
+        Execute a single model call and return (validated_text, error_reason).
+        error_reason is a human-readable string when the model call failed or produced unusable output.
+        """
+        if provider == "gemini":
+            if not self.gemini_client:
+                return None, "gemini client not configured"
+            gen_config = {"max_output_tokens": min(max_output_tokens, 64)}
             try:
                 response = self.gemini_client.models.generate_content(
-                    model=model_name,
+                    model=model,
                     contents=self.PRE_PROMPT + prompt,
                     generation_config=gen_config,
                 )
             except Exception as e:
-                # Older/alternate SDKs may not accept generation_config; retry without it
                 if isinstance(e, TypeError) and "generation_config" in str(e):
                     try:
                         response = self.gemini_client.models.generate_content(
-                            model=model_name,
+                            model=model,
                             contents=self.PRE_PROMPT + prompt,
                             config=gen_config,
                         )
@@ -145,84 +232,152 @@ class GenAIHandler:
                         e = inner_e
                         response = None
                 if response is None:
-                    print(f"GenAIHandler generate error (model={model_name}): {e}")
-                    logger.log_ai_event(f"GenAIHandler generate error (model={model_name}): {e}", radio)
-                    if self._should_switch_gemini_model(e) and idx < len(models_to_try) - 1:
-                        next_model = models_to_try[idx + 1]
-                        logger.log_ai_event(f"Switching Gemini model to fallback {next_model}", radio)
-                        print(f"Switching Gemini model to fallback {next_model}")
-                        continue
-                    return None, True
+                    logger.log_ai_event(f"GenAIHandler generate error (model={model}): {e}", radio)
+                    print(f"GenAIHandler generate error (model={model}): {e}")
+                    if self._is_rate_limit_error(e):
+                        self._set_model_cooldown(provider, model, radio, str(e))
+                    else:
+                        self._set_model_cooldown(provider, model, radio, f"error: {e}")
+                    return None, str(e)
             text = getattr(response, "text", "") or ""
-            if model_name != self.gemini_model:
-                logger.log_ai_event(f"Using Gemini fallback (model={model_name})", radio)
-                print(f"Using Gemini fallback model {model_name}")
-            self._update_gemini_model(model_name)
-            return self._log_and_validate(text, radio), False
-        return None, True
+            validated, reason = self._log_and_validate(text, radio)
+            if validated is None:
+                if reason:
+                    self._set_model_cooldown(provider, model, radio, reason)
+                return None, reason or "empty or invalid response"
+            return validated, None
 
-    def _generate_with_groq(self, prompt: str, radio: str, max_output_tokens: int) -> str | None:
-        if not self.groq_client:
-            logger.log_ai_event("Groq requested but not configured", radio)
-            reason = self.groq_client_error or "unknown reason"
-            print(f"Groq client not configured; skipping Groq call. Reason: {reason}")
-            return None
-        messages = (
-            [{"role": "system", "content": self.PRE_PROMPT}] if self.PRE_PROMPT else []
-        ) + [
-            {"role": "user", "content": prompt},
-            # Few-shot the empty-response expectation to reduce false positives (matches playground pattern)
-            {"role": "assistant", "content": ""},
-            {"role": "user", "content": ""},
-        ]
-        params = {
-            "model": self.groq_model,
-            "messages": messages,
-            "temperature": 1,
-        }
-        params["max_tokens"] = min(max_output_tokens, 64)
+        if provider == "groq":
+            if not self.groq_client:
+                reason = self.groq_client_error or "groq client not configured"
+                logger.log_ai_event("Groq requested but not configured", radio)
+                print(f"Groq client not configured; skipping Groq call. Reason: {reason}")
+                return None, reason
+            messages = (
+                [{"role": "system", "content": self.PRE_PROMPT}] if self.PRE_PROMPT else []
+            ) + [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": ""},
+                {"role": "user", "content": ""},
+            ]
+            params = {
+                "model": model,
+                "messages": messages,
+                "temperature": 1,
+                "max_tokens": min(max_output_tokens, 64),
+            }
+            try:
+                response = self.groq_client.chat.completions.create(**params)
+                text = (response.choices[0].message.content or "").strip() if response and response.choices else ""
+                validated, reason = self._log_and_validate(text, radio)
+                if validated is None:
+                    if reason:
+                        self._set_model_cooldown(provider, model, radio, reason)
+                    return None, reason or "empty or invalid response"
+                return validated, None
+            except Exception as e:
+                print(f"Groq generate error: {e}")
+                logger.log_ai_event(f"Groq generate error: {e}", radio)
+                if self._is_rate_limit_error(e):
+                    self._set_model_cooldown(provider, model, radio, str(e))
+                else:
+                    self._set_model_cooldown(provider, model, radio, f"error: {e}")
+                return None, str(e)
 
-        try:
-            response = self.groq_client.chat.completions.create(**params)
-            text = (response.choices[0].message.content or "").strip() if response and response.choices else ""
-            if not text and self._groq_fallbacks:
-                next_model = self._groq_fallbacks.pop(0)
-                logger.log_ai_event(f"Groq returned empty response; switching model to {next_model}", radio)
-                self.groq_model = next_model
-                return self._generate_with_groq(prompt, radio, max_output_tokens)
-            logger.log_ai_event(f"Using Groq fallback (model={self.groq_model})", radio)
-            return self._log_and_validate(text, radio)
-        except Exception as e:
-            print(f"Groq generate error: {e}")
-            logger.log_ai_event(f"Groq generate error: {e}", radio)
-            err_str = str(e).lower()
-            if "decommissioned" in err_str or "no longer supported" in err_str or "model_not_found" in err_str:
-                if self._groq_fallbacks:
-                    next_model = self._groq_fallbacks.pop(0)
-                    logger.log_ai_event(f"Switching Groq model to fallback {next_model}", radio)
-                    self.groq_model = next_model
-                    return self._generate_with_groq(prompt, radio, max_output_tokens)
-                logger.log_ai_event("No Groq fallback models left to try", radio)
-            return None
+        if provider == "mistral":
+            if not self.mistral_client:
+                reason = self.mistral_client_error or "mistral client not configured"
+                logger.log_ai_event("Mistral requested but not configured", radio)
+                print(f"Mistral client not configured; skipping Mistral call. Reason: {reason}")
+                return None, reason
+            messages = (
+                [{"role": "system", "content": self.PRE_PROMPT}] if self.PRE_PROMPT else []
+            ) + [
+                {"role": "user", "content": prompt},
+            ]
+            params = {
+                "model": model,
+                "messages": messages,
+                "temperature": 1,
+                "max_tokens": min(max_output_tokens, 64),
+            }
+            try:
+                response = self.mistral_client.chat.complete(**params)
+                text = ""
+                try:
+                    choice = response.choices[0] if response and getattr(response, "choices", None) else None
+                    message = getattr(choice, "message", None) if choice else None
+                    content = getattr(message, "content", "") if message else ""
+                    if isinstance(content, list):  # mistralai may return list of dicts
+                        text = "".join(
+                            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+                        )
+                    else:
+                        text = content or ""
+                    text = text.strip()
+                except Exception:
+                    text = ""
+                validated, reason = self._log_and_validate(text, radio)
+                if validated is None:
+                    if reason:
+                        self._set_model_cooldown(provider, model, radio, reason)
+                    return None, reason or "empty or invalid response"
+                return validated, None
+            except Exception as e:
+                print(f"Mistral generate error: {e}")
+                logger.log_ai_event(f"Mistral generate error: {e}", radio)
+                if self._is_rate_limit_error(e):
+                    self._set_model_cooldown(provider, model, radio, str(e))
+                else:
+                    self._set_model_cooldown(provider, model, radio, f"error: {e}")
+                return None, str(e)
+
+        return None, "unknown provider"
+
+    def _run_provider_models(self, provider: str, prompt: str, radio: str, max_output_tokens: int) -> str | None:
+        models = self._provider_models(provider)
+        for idx, model in enumerate(models):
+            if self._model_in_cooldown(model):
+                logger.log_ai_event(f"{provider} model {model} is in cooldown; skipping", radio)
+                print(f"{provider} model {model} in cooldown; skipping")
+                continue
+            result, error = self._call_model(provider, model, prompt, radio, max_output_tokens)
+            if result is not None:
+                if model != models[0]:
+                    logger.log_ai_event(f"Using {provider} fallback (model={model})", radio)
+                    print(f"Using {provider} fallback model {model}")
+                self._record_model_usage(provider, model, radio)
+                return result
+            if error and idx < len(models) - 1:
+                next_model = models[idx + 1]
+                logger.log_ai_event(f"{provider} model {model} failed; trying fallback {next_model} because: {error}", radio)
+                print(f"{provider} model {model} failed; trying fallback {next_model} because: {error}")
+            elif error:
+                logger.log_ai_event(f"{provider} model {model} failed with no further fallbacks: {error}", radio)
+                print(f"{provider} model {model} failed with no further fallbacks: {error}")
+        return None
+
 
     def generate(self, prompt: str, radio: str = "", max_output_tokens: int = 1024) -> str | None:
+        # Reset last-used metadata for this call to avoid stale values when generation fails.
+        self.last_provider = ""
+        self.last_model = ""
         self._check_pre_prompt_update()
         logger.log_ai_event(f"Context: {prompt}", radio)
         if self.provider == "groq":
-            return self._generate_with_groq(prompt, radio, max_output_tokens)
+            return self._run_provider_models("groq", prompt, radio, max_output_tokens)
 
         if self.provider == "gemini":
-            text, _ = self._generate_with_gemini(prompt, radio, max_output_tokens)
-            return text
+            return self._run_provider_models("gemini", prompt, radio, max_output_tokens)
 
-        # auto: try gemini first, then groq on rate limit / missing key
-        text, fallback = self._generate_with_gemini(prompt, radio, max_output_tokens)
-        if text is not None:
-            return text
-        if fallback:
-            logger.log_ai_event("Falling back to Groq after Gemini issue", radio)
-            print("Gemini issue detected; falling back to Groq")
-            return self._generate_with_groq(prompt, radio, max_output_tokens)
+        if self.provider == "mistral":
+            return self._run_provider_models("mistral", prompt, radio, max_output_tokens)
+
+        # auto: sequential provider order gemini -> mistral -> groq
+        for provider in ("gemini", "mistral", "groq"):
+            text = self._run_provider_models(provider, prompt, radio, max_output_tokens)
+            if text is not None:
+                return text
         return None
 
 if __name__ == "__main__":

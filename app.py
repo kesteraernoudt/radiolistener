@@ -5,8 +5,9 @@ import threading
 import json
 from web import routes
 from audio.controller import RadioController
-from audio import process
+from audio import process, clip_saver
 from utils.telegram_bot import TelegramBot
+from utils import logger
 from dotenv import load_dotenv
 import os
 import logging
@@ -43,7 +44,9 @@ class RadioListener:
         self.CONFIG["TELEGRAM_CHAT_ID"] = os.getenv("TELEGRAM_CHAT_ID")
         self.CONFIG["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
         self.CONFIG["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY") or ""
+        self.CONFIG["MISTRAL_API_KEY"] = os.getenv("MISTRAL_API_KEY") or ""
         self.CONFIG["AI_PROVIDER"] = os.getenv("AI_PROVIDER", self.CONFIG.get("AI_PROVIDER", "auto"))
+        logger.run_startup_cleanup(self.CONFIG.get("KEEP_DAYS", 7), clip_saver.CLIP_DIR)
         self.telegramBot = TelegramBot(self.CONFIG["TELEGRAM_BOT_TOKEN"], self)
         for radio_conf_path in self.CONFIG["RADIO_CONFIGS"]:
             radio_conf_path = os.path.join("config", radio_conf_path)

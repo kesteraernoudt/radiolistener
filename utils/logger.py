@@ -1,4 +1,5 @@
 import os
+import threading
 from datetime import datetime, timedelta
 from collections import defaultdict
 
@@ -10,6 +11,11 @@ MAX_AI_LINES = 1000
 
 transcript_log = defaultdict(list)
 ai_log = list()
+
+_retention_days = 7
+_clip_dir = "clips"
+_last_cleanup_date = None
+_cleanup_lock = threading.Lock()
 
 
 def _extract_timestamp(line):
@@ -68,8 +74,100 @@ def _finalize_lines(lines, num_lines, start_datetime=None, reverse=False, revers
         result.reverse()
     return result
 
+
+def configure_cleanup(keep_days=None, clip_dir=None):
+    """
+    Configure log/clip cleanup behavior.
+    """
+    global _retention_days, _clip_dir
+    if keep_days is not None:
+        try:
+            _retention_days = max(int(keep_days), 0)
+        except (TypeError, ValueError):
+            pass
+    if clip_dir:
+        _clip_dir = clip_dir
+
+
+def _cleanup_dir(path, keep_days, allowed_exts=None):
+    """
+    Remove files in a directory older than keep_days. Returns list of removed paths.
+    """
+    removed = []
+    if keep_days is None:
+        return removed
+
+    try:
+        entries = os.listdir(path)
+    except FileNotFoundError:
+        return removed
+
+    cutoff = datetime.now() - timedelta(days=max(keep_days, 0))
+    for name in entries:
+        full_path = os.path.join(path, name)
+        if not os.path.isfile(full_path):
+            continue
+        if allowed_exts:
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in allowed_exts:
+                continue
+        try:
+            mtime = datetime.fromtimestamp(os.path.getmtime(full_path))
+        except OSError:
+            continue
+        if mtime < cutoff:
+            try:
+                os.remove(full_path)
+                removed.append(full_path)
+            except OSError:
+                continue
+    return removed
+
+
+def cleanup_logs(keep_days=None):
+    """
+    Delete log files older than keep_days days.
+    """
+    days = _retention_days if keep_days is None else keep_days
+    return _cleanup_dir(LOG_DIR, days, allowed_exts={".log"})
+
+
+def cleanup_clips(keep_days=None, clip_dir=None):
+    """
+    Delete clip files older than keep_days days.
+    """
+    days = _retention_days if keep_days is None else keep_days
+    directory = clip_dir or _clip_dir
+    return _cleanup_dir(directory, days, allowed_exts={".wav", ".mp3", ".flac", ".aac"})
+
+
+def ensure_daily_cleanup(force=False):
+    """
+    Run cleanup at most once per calendar day (or immediately when forced).
+    """
+    global _last_cleanup_date
+    today = datetime.now().date()
+    if not force and _last_cleanup_date == today:
+        return
+    with _cleanup_lock:
+        if not force and _last_cleanup_date == today:
+            return
+        cleanup_logs()
+        cleanup_clips()
+        _last_cleanup_date = today
+
+
+def run_startup_cleanup(keep_days=None, clip_dir=None):
+    """
+    Configure retention and perform an immediate cleanup (once per process start).
+    """
+    configure_cleanup(keep_days=keep_days, clip_dir=clip_dir)
+    ensure_daily_cleanup(force=True)
+
+
 def log_event(radio, msg):
     global transcript_log
+    ensure_daily_cleanup()
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts} - {radio}] {msg}"
     transcript_log[radio.upper()].append(line)
@@ -82,6 +180,7 @@ def log_event(radio, msg):
 
 def log_ai_event(msg, radio=""):
     global ai_log
+    ensure_daily_cleanup()
     msg = msg.rstrip()
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     radio_tag = (radio or "GLOBAL").upper()
@@ -93,15 +192,6 @@ def log_ai_event(msg, radio=""):
     with open(logfile, "a") as f:
         f.write(line + "\n")
     return line
-
-def cleanup_logs(days=7):
-    cutoff = datetime.now() - timedelta(days=days)
-    for f in os.listdir(LOG_DIR):
-        path = os.path.join(LOG_DIR, f)
-        if os.path.isfile(path):
-            mtime = datetime.fromtimestamp(os.path.getmtime(path))
-            if mtime < cutoff:
-                os.remove(path)
 
 def get_radio_log(radio="", num_lines=100, start_datetime=None, reverse=False):
     """

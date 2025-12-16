@@ -136,6 +136,7 @@ class RadioController:
                 f"{self.RADIO_CONF.get('NAME','UNKNOWN')}: [MONITOR] Queue size: {len(self.audio_queue)}/{self.audio_queue.maxlen}"
             )
             threading.Event().wait(5)
+            logger.ensure_daily_cleanup()
 
     def restart(self):
         self.stop()
@@ -172,6 +173,7 @@ class RadioController:
             self.CONFIG["CLIP_DURATION"],
             self.CONFIG["GEMINI_API_KEY"],
             self.CONFIG.get("GROQ_API_KEY", ""),
+            self.CONFIG.get("MISTRAL_API_KEY", ""),
             self.CONFIG.get("AI_PROVIDER", "auto"),
             self.CONFIG["AI_PRE_PROMPT_FILE"],
             self,

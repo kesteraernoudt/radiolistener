@@ -25,6 +25,7 @@ class StreamProcessor:
         CLIP_DURATION: float = 10.0,
         GENAI_API_KEY: str = "",
         GROQ_API_KEY: str = "",
+        MISTRAL_API_KEY: str = "",
         AI_PROVIDER: str = "auto",
         pre_prompt_file: str = "",
         controller=None,
@@ -69,6 +70,7 @@ class StreamProcessor:
             gemini_api_key=GENAI_API_KEY,
             pre_prompt_file=pre_prompt_file,
             groq_api_key=GROQ_API_KEY,
+            mistral_api_key=MISTRAL_API_KEY or (getattr(self.controller, "CONFIG", {}) or {}).get("MISTRAL_API_KEY", ""),
             provider=AI_PROVIDER,
         )
         self.controller = controller
