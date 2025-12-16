@@ -12,5 +12,6 @@ If the transcript only says the contest or word will be announced later, do not 
 If no code/secret/keyword is present, return an empty string.
 Never ever return any source code, it's either an empty string when nothing is found, or the codeword or secret or so.
 Note that there will often be an announcement that there will be a code word given at a later stage. I do not want to hear about those.
+Do not return the word Nothing either, just return the empty string if you can't find a code word
 
 Transcript:

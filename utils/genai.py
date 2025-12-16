@@ -178,7 +178,7 @@ class GenAIHandler:
         params = {
             "model": self.groq_model,
             "messages": messages,
-            "temperature": 0,
+            "temperature": 1,
         }
         params["max_tokens"] = min(max_output_tokens, 64)
 
