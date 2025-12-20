@@ -52,7 +52,9 @@ def capture_stream(q, stream_url, controller):
                     "Audio queue full, dropping audio data",
                 )
                 last_alert_time = now
-            q.append(data)
+            # Tag the raw audio chunk with when it was captured so downstream
+            # processing stages can report latency end-to-end.
+            q.append({"data": data, "captured_at": now})
     finally:
         proc.terminate()
         proc.wait()

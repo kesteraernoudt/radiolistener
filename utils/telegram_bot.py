@@ -408,6 +408,7 @@ class TelegramBot():
         with processor.lock:
             audio_bytes = bytes(processor.rolling_buffer) if processor.rolling_buffer else b""
             context_slice = list(processor.previous_texts[-num_lines:]) if processor.previous_texts else []
+            capture_ts = processor.segment_times[0][2] if getattr(processor, "segment_times", None) else None
         context_text = "\n".join(context_slice) if context_slice else ""
 
         if not audio_bytes:
@@ -415,7 +416,7 @@ class TelegramBot():
             return
 
         try:
-            filename = clip_saver.save_clip(audio_bytes)
+            filename = clip_saver.save_clip(audio_bytes, capture_ts=capture_ts)
         except Exception as e:
             await update.message.reply_text(f"Failed to save clip: {e}")
             return
