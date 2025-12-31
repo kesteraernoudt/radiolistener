@@ -81,6 +81,16 @@
       transition: width 0.3s ease;
     }
 
+    .chip {
+      display: inline-block;
+      padding: 2px 6px;
+      margin: 2px 4px 2px 0;
+      background: #f3f4f6;
+      border-radius: 12px;
+      font-size: 12px;
+      color: #374151;
+    }
+
     .tab-buttons {
       display: inline-flex;
       gap: 6px;
@@ -333,6 +343,11 @@
               Last match <span id="last-match-ago-{{ radio.name }}">--</span><br>
               Last alert <span id="last-alert-ago-{{ radio.name }}">--</span>
             </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Latency Timeline</div>
+            <div class="stat-main" id="latency-timeline-summary-{{ radio.name }}">--</div>
+            <div class="stat-sub" id="latency-timeline-detail-{{ radio.name }}">--</div>
           </div>
         </div>
       </div>
@@ -750,6 +765,33 @@
       return `${(diff / 3600).toFixed(1)}h ago`;
     }
 
+    function renderTimelineDetail(name, stats) {
+      const container = document.getElementById(`latency-timeline-detail-${name}`);
+      const raw = (stats.last_timeline && stats.last_timeline.raw) || {};
+      const captured = raw.captured_at;
+      if (!container) return;
+      if (!captured) {
+        container.textContent = "--";
+        return;
+      }
+      const stages = [
+        { key: "frame_extracted_at", label: "Extracted" },
+        { key: "queued_for_transcription_at", label: "Queued" },
+        { key: "transcription_start_at", label: "ASR start" },
+        { key: "transcription_end_at", label: "ASR end" },
+        { key: "processing_completed_at", label: "Processed" },
+        { key: "clip_saved_at", label: "Clip saved" },
+        { key: "telegram_sent_at", label: "Telegram" },
+      ];
+      const chips = stages
+        .filter(stage => raw[stage.key])
+        .map(stage => {
+          const delta = ((raw[stage.key] - captured) * 1000).toFixed(0);
+          return `<span class="chip">${stage.label}: ${delta}ms</span>`;
+        });
+      container.innerHTML = chips.length ? chips.join(" ") : "--";
+    }
+
     function updatePerfCards(name, stats) {
       // Latencies
       setText(`latency-process-last-${name}`, formatMs(stats.last_t_process));
@@ -787,6 +829,10 @@
       setText(`last-event-ago-${name}`, formatAgo(stats.last_event_ts));
       setText(`last-match-ago-${name}`, formatAgo(stats.last_match_ts));
       setText(`last-alert-ago-${name}`, formatAgo(stats.last_alert_ts));
+
+      const summary = (stats.last_timeline && stats.last_timeline.summary) || "";
+      setText(`latency-timeline-summary-${name}`, summary || "--");
+      renderTimelineDetail(name, stats);
     }
 
     function restartRadio(name) {
