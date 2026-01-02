@@ -1,12 +1,16 @@
 import asyncio
 import json
+from io import BytesIO
 from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import BadRequest
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from utils import logger
 from audio import clip_saver
 
 class TelegramBot():
+    MAX_MESSAGE_LENGTH = 4000
+
     def __init__(self, token, radioListener):
         self.token = token
         self.radioListener = radioListener
@@ -54,6 +58,19 @@ class TelegramBot():
                 continue
         
         return None
+
+    async def _reply_text_or_document(self, update, content: str, filename: str, caption: str = ""):
+        """Send text unless it exceeds Telegram limits, otherwise fall back to a document."""
+        if len(content) <= self.MAX_MESSAGE_LENGTH:
+            try:
+                await update.message.reply_text(content)
+                return
+            except BadRequest as exc:
+                if "Message is too long" not in str(exc):
+                    raise
+        bio = BytesIO(content.encode("utf-8"))
+        bio.name = filename
+        await update.message.reply_document(document=bio, caption=caption or filename)
 
     def bot_main(self):
         # Build the Application inside the async function to ensure it's in the correct event loop
@@ -450,12 +467,15 @@ class TelegramBot():
                 await update.message.reply_text(f"No such radio station found ({radio}) or processor not initialized.")
                 return
             stats = controller.get_stats()
-            await update.message.reply_text(f"{controller.RADIO_CONF.get('NAME','UNKNOWN')}:\n{json.dumps(stats, indent=2)}")
+            station_name = controller.RADIO_CONF.get('NAME','UNKNOWN')
+            payload = f"{station_name}:\n{json.dumps(stats, indent=2)}"
+            await self._reply_text_or_document(update, payload, f"{station_name}_stats.json", caption=f"{station_name} stats")
         else:
             stats = {}
             for controller in self.radioListener.controllers.values():
                 stats[controller.RADIO_CONF.get('NAME','UNKNOWN')] = controller.get_stats()
-            await update.message.reply_text(json.dumps(stats, indent=2))
+            payload = json.dumps(stats, indent=2)
+            await self._reply_text_or_document(update, payload, "all_stats.json", caption="All stations stats")
 
     def send_message(self, text):
         if self.app is None:

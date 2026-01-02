@@ -1,5 +1,6 @@
 import os
 import time
+import re
 
 import google.genai as genai
 from utils import logger
@@ -140,30 +141,54 @@ class GenAIHandler:
         )
         print(f"{provider} model {model} entered cooldown for {self.COOLDOWN_SECONDS}s because: {reason}")
 
-    def _log_and_validate(self, text: str, radio: str = "") -> tuple[str | None, str | None]:
-        logger.log_ai_event(f"Response: {text}", radio)
-        trimmed = text.strip() if text else ""
+    def _log_and_validate(self, text: str, radio: str = "") -> tuple[str | None, str | None, bool]:
+        raw = text if text is not None else ""
+        # Strip punctuation entirely before validation to drop wrapper-only responses.
+        cleaned = re.sub(r"[^\w\s]", " ", raw)
+        # Normalize whitespace
+        trimmed = " ".join(cleaned.strip().split())
+        display = trimmed or "<empty>"
+
+        def reject(reason: str, cooldown: bool = False):
+            logger.log_ai_event(f"Ignored AI response ({reason}): {display}", radio)
+            return None, reason, cooldown
+
+        # Empty is a valid outcome (no codeword found); accept without triggering fallback.
         if not trimmed:
-            reason = "Empty or whitespace AI response; treating as no codeword"
-            logger.log_ai_event(reason, radio)
-            return "", None
-        # Drop obvious empty wrappers
-        if trimmed in {"''", '\"\"', "``", "()", "[]", "{}", "\"", "'"}:
-            reason = "Only punctuation/quotes returned; treating as no codeword"
-            logger.log_ai_event(reason, radio)
-            return "", None
+            logger.log_ai_event("Response: <empty>", radio)
+            return "", None, False
+
         normalized = trimmed.lower()
-        # Treat common "empty string" explanations as no-codeword
-        if "empty string" in normalized or "no code" in normalized or "no keyword" in normalized:
-            reason = "Interpreting model message as empty response"
-            logger.log_ai_event(reason, radio)
-            return "", None
+        invalid_markers = (
+            "empty string",
+            "no output",
+            "no valid code word",
+            "no valid codeword",
+            "no valid keyword",
+            "no code word",
+            "no codeword",
+            "no keyword",
+            "no key word",
+            "no word found",
+            "no valid word",
+            "no valid answer",
+            "no answer",
+            "no response",
+            "nothing",
+            "none",
+            "n/a",
+            "null",
+        )
+        if any(marker in normalized for marker in invalid_markers):
+            logger.log_ai_event("Response: <empty> (model indicated no codeword)", radio)
+            return "", None, False
+
         # this should be a keyword or codeword or so, not a long response. So filter out any long reply
         if len(trimmed) > 30:
-            reason = "Response too long to be a codeword; skipping"
-            logger.log_ai_event(reason, radio)
-            return None, reason
-        return trimmed, None
+            return reject("Response too long to be a codeword")
+
+        logger.log_ai_event(f"Response: {trimmed}", radio)
+        return trimmed, None, False
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         message = str(error).upper()
@@ -240,9 +265,9 @@ class GenAIHandler:
                         self._set_model_cooldown(provider, model, radio, f"error: {e}")
                     return None, str(e)
             text = getattr(response, "text", "") or ""
-            validated, reason = self._log_and_validate(text, radio)
+            validated, reason, cooldown = self._log_and_validate(text, radio)
             if validated is None:
-                if reason:
+                if reason and cooldown:
                     self._set_model_cooldown(provider, model, radio, reason)
                 return None, reason or "empty or invalid response"
             return validated, None
@@ -269,9 +294,9 @@ class GenAIHandler:
             try:
                 response = self.groq_client.chat.completions.create(**params)
                 text = (response.choices[0].message.content or "").strip() if response and response.choices else ""
-                validated, reason = self._log_and_validate(text, radio)
+                validated, reason, cooldown = self._log_and_validate(text, radio)
                 if validated is None:
-                    if reason:
+                    if reason and cooldown:
                         self._set_model_cooldown(provider, model, radio, reason)
                     return None, reason or "empty or invalid response"
                 return validated, None
@@ -317,9 +342,9 @@ class GenAIHandler:
                     text = text.strip()
                 except Exception:
                     text = ""
-                validated, reason = self._log_and_validate(text, radio)
+                validated, reason, cooldown = self._log_and_validate(text, radio)
                 if validated is None:
-                    if reason:
+                    if reason and cooldown:
                         self._set_model_cooldown(provider, model, radio, reason)
                     return None, reason or "empty or invalid response"
                 return validated, None

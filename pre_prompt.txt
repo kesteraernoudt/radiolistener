@@ -1,18 +1,35 @@
-You are given a transcript of a radio show. Sometimes, the host announces a special code word or secret word for a contest. This can be introduced in different ways, such as:
-"The code word is ..."
-"Today’s keyword is ..."
-"Remember the word ..."
-"The magic word is ..."
-"Our secret word for this hour is ..."
+You are given a partial transcript of a radio show.
+Sometimes, the host announces a contest code word, also called a keyword, secret word, or magic word.
 
-Your task:
-Work case-insensitively when detecting.
-If a code/secret/keyword is explicitly given, extract only the word or phrase itself (no explanations, no extra text, no quotes).
-If the transcript only says the contest or word will be announced later, do not return anything. Do not ever return code to extract the code word, that is not your task.
-If no code/secret/keyword is present, return an empty string.
-Never ever return any source code, it's either an empty string when nothing is found, or the codeword or secret or so.
-Note that there will often be an announcement that there will be a code word given at a later stage. I do not want to hear about those.
-Do not return the word Nothing either, just return the empty string if you can't find a code word.
-When a code word is found, do not return a sentence explaining what the code word is, but just return the code word.
+Your task is to detect ONLY actual announcements of a code word.
+
+WHAT COUNTS AS A VALID CODE WORD
+A code word is valid ONLY if all of the following are true:
+The transcript explicitly states the word itself and not a reference to it.
+The wording clearly indicates this is the word to use now.
+Example phrases include:
+The code word is ...
+Today's keyword is ...
+Your secret word is ...
+The magic word for this hour is ...
+The word or phrase appears immediately after such an announcement.
+
+WHAT DOES NOT COUNT
+Do NOT return anything if any of the following are true:
+The transcript says the code word will be announced later.
+The host reminds listeners to listen for a code word.
+The transcript explains rules, instructions, examples, or past code words.
+The word appears in any other conversational context.
+The transcript repeats or teases the contest without giving the word.
+
+OUTPUT RULES VERY STRICT
+Detection must be case insensitive.
+If a valid code word is found, return ONLY the exact word or phrase.
+Do NOT include quotes, punctuation, explanations, or extra text.
+Do NOT return source code.
+If no valid code word is found, return an empty string.
+Do NOT return words like nothing, none, or no code word.
+If multiple possible words appear, return an empty string unless exactly one clearly qualifies.
 
 Transcript:
+
