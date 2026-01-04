@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import re
 
 import google.genai as genai
@@ -14,6 +15,102 @@ try:
     from mistralai import Mistral
 except ImportError:  # pragma: no cover - safety if dependency missing
     Mistral = None
+
+
+DEFAULT_JSON_RESULT = {"codeword": None, "confidence": 0, "evidence": None}
+
+
+def extract_first_json_object(text: str) -> str | None:
+    """
+    Scan the text for the first balanced JSON object starting at the first '{'.
+    Returns the raw substring including braces, or None if not found.
+    """
+    if not text:
+        return None
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : idx + 1]
+    return None
+
+
+def parse_json_or_reject(raw_text: str) -> dict:
+    """
+    Strictly parse model output into the required schema.
+    Falls back to balanced-brace extraction before rejecting.
+    """
+    def _default():
+        return dict(DEFAULT_JSON_RESULT)
+
+    def _clean_string(val):
+        if val is None:
+            return None
+        if not isinstance(val, str):
+            return None
+        stripped = val.strip()
+        return stripped if stripped else None
+
+    candidate_text = raw_text or ""
+    candidate_text = candidate_text.strip()
+    # Strip common code-fence wrappers (e.g., ```json ... ```)
+    if candidate_text.startswith("```"):
+        candidate_text = re.sub(r"^```[a-zA-Z0-9_-]*\s*|\s*```$", "", candidate_text).strip()
+    obj = None
+    try:
+        obj = json.loads(candidate_text)
+    except Exception:
+        extracted = extract_first_json_object(candidate_text)
+        if not extracted:
+            return _default()
+        try:
+            obj = json.loads(extracted)
+        except Exception:
+            return _default()
+
+    if not isinstance(obj, dict):
+        return _default()
+
+    if set(obj.keys()) != {"codeword", "confidence", "evidence"}:
+        return _default()
+
+    codeword = _clean_string(obj.get("codeword"))
+    evidence = _clean_string(obj.get("evidence"))
+    confidence = obj.get("confidence")
+    try:
+        confidence_val = float(confidence)
+    except Exception:
+        return _default()
+
+    if confidence_val < 0 or confidence_val > 1:
+        return _default()
+
+    if evidence is not None and codeword is None:
+        # If no codeword, evidence must be null
+        return _default()
+
+    if codeword is None:
+        return {
+            "codeword": None,
+            "confidence": confidence_val,
+            "evidence": None,
+        }
+
+    if evidence is None:
+        return _default()
+
+    return {
+        "codeword": codeword,
+        "confidence": confidence_val,
+        "evidence": evidence,
+    }
 
 
 class GenAIHandler:
@@ -101,6 +198,9 @@ class GenAIHandler:
         self.PRE_PROMPT = ""
         self.last_provider = ""
         self.last_model = ""
+        self.last_confidence: float = 0.0
+        self.last_evidence: str | None = None
+        self.last_result: dict = dict(DEFAULT_JSON_RESULT)
         self._model_cooldowns = {}
         self._load_pre_prompt()
         self._init_model_cooldowns()
@@ -142,53 +242,28 @@ class GenAIHandler:
         print(f"{provider} model {model} entered cooldown for {self.COOLDOWN_SECONDS}s because: {reason}")
 
     def _log_and_validate(self, text: str, radio: str = "") -> tuple[str | None, str | None, bool]:
-        raw = text if text is not None else ""
-        # Strip punctuation entirely before validation to drop wrapper-only responses.
-        cleaned = re.sub(r"[^\w\s]", " ", raw)
-        # Normalize whitespace
-        trimmed = " ".join(cleaned.strip().split())
-        display = trimmed or "<empty>"
+        parsed = parse_json_or_reject(text)
+        self.last_result = dict(parsed)
+        try:
+            self.last_confidence = float(parsed.get("confidence", 0) or 0)
+        except Exception:
+            self.last_confidence = 0.0
+        self.last_evidence = parsed.get("evidence")
+        codeword = parsed.get("codeword")
+        confidence = self.last_confidence
+        evidence = self.last_evidence
 
-        def reject(reason: str, cooldown: bool = False):
-            logger.log_ai_event(f"Ignored AI response ({reason}): {display}", radio)
-            return None, reason, cooldown
-
-        # Empty is a valid outcome (no codeword found); accept without triggering fallback.
-        if not trimmed:
-            logger.log_ai_event("Response: <empty>", radio)
+        if codeword is None:
+            logger.log_ai_event(f"Response: <empty> (confidence={confidence})", radio)
+            if text and parsed == DEFAULT_JSON_RESULT:
+                logger.log_ai_event("Parsed to default/null despite non-empty raw response", radio)
             return "", None, False
 
-        normalized = trimmed.lower()
-        invalid_markers = (
-            "empty string",
-            "no output",
-            "no valid code word",
-            "no valid codeword",
-            "no valid keyword",
-            "no code word",
-            "no codeword",
-            "no keyword",
-            "no key word",
-            "no word found",
-            "no valid word",
-            "no valid answer",
-            "no answer",
-            "no response",
-            "nothing",
-            "none",
-            "n/a",
-            "null",
+        logger.log_ai_event(
+            f"Response: codeword={codeword} confidence={confidence} evidence={evidence}",
+            radio,
         )
-        if any(marker in normalized for marker in invalid_markers):
-            logger.log_ai_event("Response: <empty> (model indicated no codeword)", radio)
-            return "", None, False
-
-        # this should be a keyword or codeword or so, not a long response. So filter out any long reply
-        if len(trimmed) > 30:
-            return reject("Response too long to be a codeword")
-
-        logger.log_ai_event(f"Response: {trimmed}", radio)
-        return trimmed, None, False
+        return codeword, None, False
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         message = str(error).upper()
@@ -235,28 +310,52 @@ class GenAIHandler:
         Execute a single model call and return (validated_text, error_reason).
         error_reason is a human-readable string when the model call failed or produced unusable output.
         """
+        requested_tokens = max(128, min(max_output_tokens, 256))
+
         if provider == "gemini":
             if not self.gemini_client:
                 return None, "gemini client not configured"
-            gen_config = {"max_output_tokens": min(max_output_tokens, 64)}
+            gen_config = {"max_output_tokens": requested_tokens, "temperature": 0}
+            response = None
             try:
+                # Newer SDK signature
                 response = self.gemini_client.models.generate_content(
                     model=model,
                     contents=self.PRE_PROMPT + prompt,
                     generation_config=gen_config,
+                    response_mime_type="application/json",
                 )
-            except Exception as e:
-                if isinstance(e, TypeError) and "generation_config" in str(e):
-                    try:
-                        response = self.gemini_client.models.generate_content(
-                            model=model,
-                            contents=self.PRE_PROMPT + prompt,
-                            config=gen_config,
-                        )
-                    except Exception as inner_e:
-                        e = inner_e
-                        response = None
-                if response is None:
+            except Exception:
+                pass
+            if response is None:
+                try:
+                    # Older signature: config + response_mime_type
+                    response = self.gemini_client.models.generate_content(
+                        model=model,
+                        contents=self.PRE_PROMPT + prompt,
+                        config=gen_config,
+                        response_mime_type="application/json",
+                    )
+                except Exception:
+                    pass
+            if response is None:
+                try:
+                    # Older signature: generation_config without response_mime_type
+                    response = self.gemini_client.models.generate_content(
+                        model=model,
+                        contents=self.PRE_PROMPT + prompt,
+                        generation_config=gen_config,
+                    )
+                except Exception:
+                    pass
+            if response is None:
+                try:
+                    # Minimal signature: contents only
+                    response = self.gemini_client.models.generate_content(
+                        model=model,
+                        contents=self.PRE_PROMPT + prompt,
+                    )
+                except Exception as e:
                     logger.log_ai_event(f"GenAIHandler generate error (model={model}): {e}", radio)
                     print(f"GenAIHandler generate error (model={model}): {e}")
                     if self._is_rate_limit_error(e):
@@ -264,6 +363,17 @@ class GenAIHandler:
                     else:
                         self._set_model_cooldown(provider, model, radio, f"error: {e}")
                     return None, str(e)
+            text = getattr(response, "text", "") if response is not None else ""
+            if not text:
+                logger.log_ai_event("Gemini returned empty content", radio)
+            else:
+                logger.log_ai_event(f"Gemini raw: {text}", radio)
+            validated, reason, cooldown = self._log_and_validate(text, radio)
+            if validated is None:
+                if reason and cooldown:
+                    self._set_model_cooldown(provider, model, radio, reason)
+                return None, reason or "empty or invalid response"
+            return validated, None
             text = getattr(response, "text", "") or ""
             validated, reason, cooldown = self._log_and_validate(text, radio)
             if validated is None:
@@ -282,18 +392,19 @@ class GenAIHandler:
                 [{"role": "system", "content": self.PRE_PROMPT}] if self.PRE_PROMPT else []
             ) + [
                 {"role": "user", "content": prompt},
-                {"role": "assistant", "content": ""},
-                {"role": "user", "content": ""},
             ]
             params = {
                 "model": model,
                 "messages": messages,
-                "temperature": 1,
-                "max_tokens": min(max_output_tokens, 64),
+                "temperature": 0,
+                "max_tokens": requested_tokens,
+                "response_format": {"type": "json_object"},
             }
             try:
                 response = self.groq_client.chat.completions.create(**params)
                 text = (response.choices[0].message.content or "").strip() if response and response.choices else ""
+                if not text:
+                    logger.log_ai_event("Groq returned empty content", radio)
                 validated, reason, cooldown = self._log_and_validate(text, radio)
                 if validated is None:
                     if reason and cooldown:
@@ -323,8 +434,8 @@ class GenAIHandler:
             params = {
                 "model": model,
                 "messages": messages,
-                "temperature": 1,
-                "max_tokens": min(max_output_tokens, 64),
+                "temperature": 0,
+                "max_tokens": requested_tokens,
             }
             try:
                 response = self.mistral_client.chat.complete(**params)
@@ -342,6 +453,10 @@ class GenAIHandler:
                     text = text.strip()
                 except Exception:
                     text = ""
+                if not text:
+                    logger.log_ai_event("Mistral returned empty content", radio)
+                else:
+                    logger.log_ai_event(f"Mistral raw: {text}", radio)
                 validated, reason, cooldown = self._log_and_validate(text, radio)
                 if validated is None:
                     if reason and cooldown:
@@ -387,6 +502,9 @@ class GenAIHandler:
         # Reset last-used metadata for this call to avoid stale values when generation fails.
         self.last_provider = ""
         self.last_model = ""
+        self.last_confidence = 0.0
+        self.last_evidence = None
+        self.last_result = dict(DEFAULT_JSON_RESULT)
         self._check_pre_prompt_update()
         logger.log_ai_event(f"Context: {prompt}", radio)
         if self.provider == "groq":

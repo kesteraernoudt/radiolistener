@@ -87,7 +87,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=64,
+        default=256,
         help="Max tokens to request from the model",
     )
     parser.add_argument(
@@ -167,11 +167,13 @@ def _run_sample_batch(handler: GenAIHandler, cases: list[dict], max_tokens: int,
         print(f"[{run_idx}/{total}] sample#{orig_idx} radio={radio} expected='{expected or '(none)'}'")
         result = handler.generate(context, radio=radio, max_output_tokens=max_tokens)
         found = (result or "").strip() if result else ""
+        conf = getattr(handler, "last_confidence", 0)
+        evidence = getattr(handler, "last_evidence", None) or ""
         match = (found.lower() == expected.lower()) if expected else (found == "")
         provider = handler.last_provider or "n/a"
         model = handler.last_model or "n/a"
         status = "OK" if match else "FAIL"
-        print(f"  -> got='{found or '(empty)'}' [{status}] provider={provider}, model={model}")
+        print(f"  -> got='{found or '(empty)'}' conf={conf:.2f} ev=\"{evidence}\" [{status}] provider={provider}, model={model}")
         if not match:
             failures.append(
                 {
@@ -266,12 +268,14 @@ def main():
 
     print(f"Using provider={args.provider}, pre_prompt={'yes' if pre_prompt else 'no'}")
     result = handler.generate(args.prompt, radio=args.radio, max_output_tokens=args.max_tokens)
+    conf = getattr(handler, "last_confidence", 0)
+    evidence = getattr(handler, "last_evidence", None) or ""
     if args.verbose and handler.provider == "auto":
         print("Auto provider flow complete (Gemini -> Groq -> Mistral fallbacks as needed).")
     used_provider = handler.last_provider or "(unknown)"
     used_model = handler.last_model or "(unknown)"
     print(f"AI used: provider={used_provider}, model={used_model}")
-    print(f"Result: {result!r}")
+    print(f"Result: {result!r} (confidence={conf:.2f}, evidence=\"{evidence}\")")
 
 
 if __name__ == "__main__":

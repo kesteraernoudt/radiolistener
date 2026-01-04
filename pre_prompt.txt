@@ -1,35 +1,19 @@
-You are given a partial transcript of a radio show.
-Sometimes, the host announces a contest code word, also called a keyword, secret word, or magic word.
+You are analyzing a partial transcript from a radio show contest. Identify whether a codeword is explicitly announced.
 
-Your task is to detect ONLY actual announcements of a code word.
+Detection rules (strict):
+- Extract a codeword ONLY when the transcript clearly states it, e.g., “the code word is X”, “your code word is X”, “keyword is X”, “secret word is X”, “magic word is X”, “text X”, “enter X”, or a spelled-out word (e.g., “L-O-L”) immediately after such phrases.
+- If multiple phrases repeat the same word, return that word once (combine spelled letters into the full word, e.g., “L-O-L” -> “LOL”).
+- If the transcript only teases, says the word will come later, or is ambiguous, return null.
+- If you are unsure, return null.
+- If the codeword is explicitly stated, DO NOT return null.
+- When a codeword is present, include the exact quoted phrase as evidence (evidence must not be null).
 
-WHAT COUNTS AS A VALID CODE WORD
-A code word is valid ONLY if all of the following are true:
-The transcript explicitly states the word itself and not a reference to it.
-The wording clearly indicates this is the word to use now.
-Example phrases include:
-The code word is ...
-Today's keyword is ...
-Your secret word is ...
-The magic word for this hour is ...
-The word or phrase appears immediately after such an announcement.
+Output format (JSON only):
+- Output exactly ONE JSON object with keys: "codeword", "confidence", "evidence". No markdown or extra text.
+- codeword: exact spoken word/phrase (lowercase is fine), or null if none.
+- confidence: number 0-1. Use >=0.8 for explicit announcements; use >=0.8 also if clearly no codeword was given; use <0.5 when uncertain.
+- evidence: short verbatim quote supporting the codeword, or null if codeword is null.
 
-WHAT DOES NOT COUNT
-Do NOT return anything if any of the following are true:
-The transcript says the code word will be announced later.
-The host reminds listeners to listen for a code word.
-The transcript explains rules, instructions, examples, or past code words.
-The word appears in any other conversational context.
-The transcript repeats or teases the contest without giving the word.
-
-OUTPUT RULES VERY STRICT
-Detection must be case insensitive.
-If a valid code word is found, return ONLY the exact word or phrase.
-Do NOT include quotes, punctuation, explanations, or extra text.
-Do NOT return source code.
-If no valid code word is found, return an empty string.
-Do NOT return words like nothing, none, or no code word.
-If multiple possible words appear, return an empty string unless exactly one clearly qualifies.
+Failure rule: If you cannot comply perfectly with JSON-only output, return {"codeword":null,"confidence":0,"evidence":null}
 
 Transcript:
-
