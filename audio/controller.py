@@ -98,7 +98,7 @@ class RadioController:
                     )
                     logger.log_event(
                         f"{self.RADIO_CONF.get('NAME','UNKNOWN')}",
-                        "Capture thread crashed: {self.capture_thread.exception}. Restarting...",
+                        f"Capture thread crashed: {self.capture_thread.exception}. Restarting...",
                     )
                 else:
                     print("Capture thread stopped unexpectedly. Restarting...")
@@ -120,7 +120,7 @@ class RadioController:
                     )
                     logger.log_event(
                         f"{self.RADIO_CONF.get('NAME','UNKNOWN')}",
-                        "Process thread crashed: {self.process_thread.exception}. Restarting...",
+                        f"Process thread crashed: {self.process_thread.exception}. Restarting...",
                     )
                 else:
                     print("Process thread stopped unexpectedly. Restarting...")
@@ -147,6 +147,9 @@ class RadioController:
 
     def send_audio(self, file_path, caption=""):
         self.listener.telegramBot.send_audio(file_path, caption)
+
+    def send_debug_message(self, text):
+        self.listener.telegramBot.send_debug_message(text)
 
     def send_sms_message(self, text):
         self.listener.telegramBot.send_sms_message(self.RADIO_CONF["SMS_NUMBER"], text)

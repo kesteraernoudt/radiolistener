@@ -43,6 +43,12 @@ TELEGRAM_BOT_TOKEN="your-telegram-bot-token-here"
 # Telegram chat id where alerts are posted (integer or string)
 TELEGRAM_CHAT_ID=1234567890
 
+# Private chat id for debug messages (integer or string)
+TELEGRAM_CHAT_ID_PRIVATE=1234567890
+
+# Optional: enable private debug messages on startup (true/false)
+TELEGRAM_DEBUG_PRIVATE=false
+
 # API keys for the generative AI backends
 GEMINI_API_KEY="your-genai-or-gemini-api-key"
 GROQ_API_KEY="your-groq-api-key"
@@ -55,6 +61,8 @@ AI_PROVIDER="auto"  # options: auto, gemini, groq
 Descriptions
 - `TELEGRAM_BOT_TOKEN`: Bot token obtained from BotFather (format: 123456:ABC-DEF...).
 - `TELEGRAM_CHAT_ID`: The chat (group or private) id to send messages/audio to. Use `@username` for channels or the numeric id for groups.
+- `TELEGRAM_CHAT_ID_PRIVATE`: Private chat id used for debug messages (latency + AI confidence/evidence).
+- `TELEGRAM_DEBUG_PRIVATE`: Optional flag to enable private debug messages on startup (true/false). You can toggle later with `/debug`.
 - `GEMINI_API_KEY`: API key used by `utils/genai.py` to instantiate the Gemini client. Keep this secret.
 - `GROQ_API_KEY`: Optional Groq key used as a fallback when Gemini is rate-limited. Keep this secret.
 - `AI_PROVIDER`: Set to `gemini` to force Gemini only, `groq` to force Groq only, or leave as `auto` (default) to use Gemini with Groq fallback.

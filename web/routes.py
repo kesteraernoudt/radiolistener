@@ -36,6 +36,8 @@ def update_config():
     CONFIG = request.json
     del CONFIG["TELEGRAM_BOT_TOKEN"]
     del CONFIG["TELEGRAM_CHAT_ID"]
+    if "TELEGRAM_CHAT_ID_PRIVATE" in CONFIG:
+        del CONFIG["TELEGRAM_CHAT_ID_PRIVATE"]
     del CONFIG["GEMINI_API_KEY"]
     with open(listener.config_path, "w") as f:
         json.dump(CONFIG, f, indent=2)

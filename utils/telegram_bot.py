@@ -1,21 +1,24 @@
 import asyncio
 import json
+from collections import deque
 from io import BytesIO
 from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError, RetryAfter
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from utils import logger
 from audio import clip_saver
 
 class TelegramBot():
     MAX_MESSAGE_LENGTH = 4000
+    DEBUG_HISTORY_LIMIT = 5
 
     def __init__(self, token, radioListener):
         self.token = token
         self.radioListener = radioListener
         self.app = None # Initialize Application here
         self.loop = None
+        self.debug_history = deque(maxlen=self.DEBUG_HISTORY_LIMIT)
     
     @staticmethod
     def parse_datetime(datetime_str):
@@ -76,6 +79,7 @@ class TelegramBot():
         # Build the Application inside the async function to ensure it's in the correct event loop
         self.app = Application.builder().token(self.token).build()
         self.loop = asyncio.get_event_loop()
+        self.app.add_error_handler(self.handle_telegram_error)
         self.app.add_handler(CommandHandler('start', self.start_command))
         self.app.add_handler(CommandHandler(['log','l'], self.log_command))
         self.app.add_handler(CommandHandler(['ailog','ail'], self.ailog_command))
@@ -86,10 +90,80 @@ class TelegramBot():
         self.app.add_handler(CallbackQueryHandler(self.button))
         self.app.add_handler(CommandHandler(['clip','c'], self.clip_command))
         self.app.add_handler(CommandHandler(['stats','s'], self.stats_command))
+        self.app.add_handler(CommandHandler(['debug', 'debugprivate'], self.debug_command))
         self.app.add_handler(CommandHandler(['listcommands', 'list'], self.list_commands))
         self.app.add_handler(CommandHandler(['words', 'w'], self.list_codewords))
         self.app.add_handler(CommandHandler(['search', 'find', 'f'], self.search_command))
         self.app.run_polling(drop_pending_updates=True)
+
+    def _log_background_exception(self, description, exc):
+        msg = f"{description} failed: {exc}"
+        logger.log_event("TELEGRAM", msg)
+        self.debug_history.append(msg)
+
+    def _schedule(self, coro, description):
+        if self.app is None or self.loop is None or self.loop.is_closed():
+            return
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        future.add_done_callback(lambda f: self._handle_future(f, description))
+
+    def _handle_future(self, future, description):
+        try:
+            exc = future.exception()
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            self._log_background_exception(description, exc)
+            return
+        if exc:
+            self._log_background_exception(description, exc)
+
+    async def _send_message(self, chat_id, text, reply_markup=None):
+        max_attempts = 2
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                await self.app.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+                return
+            except RetryAfter as exc:
+                await asyncio.sleep(min(exc.retry_after, 30))
+            except NetworkError:
+                if attempt >= max_attempts:
+                    raise
+                await asyncio.sleep(1 + attempt)
+
+    async def _send_audio(self, chat_id, audio_path, caption=""):
+        max_attempts = 2
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                with open(audio_path, "rb") as audio_file:
+                    await self.app.bot.send_audio(chat_id=chat_id, audio=audio_file, caption=caption)
+                return
+            except RetryAfter as exc:
+                await asyncio.sleep(min(exc.retry_after, 30))
+            except NetworkError:
+                if attempt >= max_attempts:
+                    raise
+                await asyncio.sleep(1 + attempt)
+
+    async def handle_telegram_error(self, update, context):
+        error = context.error
+        update_id = getattr(update, "update_id", None) if update else None
+        chat_id = getattr(getattr(update, "effective_chat", None), "id", None)
+        user_id = getattr(getattr(update, "effective_user", None), "id", None)
+        details = []
+        if update_id is not None:
+            details.append(f"update_id={update_id}")
+        if chat_id is not None:
+            details.append(f"chat_id={chat_id}")
+        if user_id is not None:
+            details.append(f"user_id={user_id}")
+        suffix = f" ({', '.join(details)})" if details else ""
+        logger.log_event("TELEGRAM", f"Handler error: {error}{suffix}")
+        self.debug_history.append(f"Handler error: {error}{suffix}")
 
     async def list_commands(self, update, context):
         commands_list = []
@@ -103,6 +177,38 @@ class TelegramBot():
             await update.message.reply_text(f"Supported commands: {', '.join(['/' + cmd for cmd in commands_list])}")
         else:
             await update.message.reply_text("No commands defined.")
+
+    async def debug_command(self, update, context):
+        """Toggle private debug notifications.
+        Usage: /debug [on|off|status]
+        """
+        was_enabled = bool(self.radioListener.CONFIG.get("TELEGRAM_DEBUG_PRIVATE", False))
+        enabled = was_enabled
+        arg = context.args[0].lower() if context.args else "status"
+        if arg in ("on", "enable", "enabled", "1", "true", "yes"):
+            enabled = True
+            self.radioListener.CONFIG["TELEGRAM_DEBUG_PRIVATE"] = True
+        elif arg in ("off", "disable", "disabled", "0", "false", "no"):
+            enabled = False
+            self.radioListener.CONFIG["TELEGRAM_DEBUG_PRIVATE"] = False
+        elif arg in ("status", "state"):
+            pass
+        else:
+            await update.message.reply_text("Usage: /debug [on|off|status]")
+            return
+
+        private_chat_id = self.radioListener.CONFIG.get("TELEGRAM_CHAT_ID_PRIVATE")
+        state = "enabled" if enabled else "disabled"
+        if not private_chat_id:
+            await update.message.reply_text(
+                f"Private debug messages are {state}, but TELEGRAM_CHAT_ID_PRIVATE is not set."
+            )
+            return
+
+        await update.message.reply_text(f"Private debug messages are {state}.")
+        if enabled and not was_enabled and self.debug_history:
+            for msg in list(self.debug_history):
+                await context.application.bot.send_message(chat_id=private_chat_id, text=msg)
 
     async def start_command(self, update, context):
         await update.message.reply_text('Hello! I am your bot.')
@@ -284,16 +390,54 @@ class TelegramBot():
             arg += 1
         if len(context.args) > arg:
             radio = context.args[arg]
-        controller = self.radioListener.controller(radio)
-        if controller is None or controller.processor is None:
-            await update.message.reply_text(f"No such radio station found ({radio}) or processor not initialized.")
-            return
-        codewords = controller.processor.get_codewords(num_lines)
-        msg = "\n".join(codewords)
-        if msg:
-            await update.message.reply_text(f"Codewords for {radio}:\n{msg}")
+        if radio:
+            controller = self.radioListener.controller(radio)
+            if controller is None or controller.processor is None:
+                await update.message.reply_text(
+                    f"No such radio station found ({radio}) or processor not initialized."
+                )
+                return
+            controllers = [controller]
         else:
-            await update.message.reply_text(f"No codewords found for {radio}.")
+            controllers = list(self.radioListener.controllers.values())
+            if not controllers:
+                await update.message.reply_text("No radio stations configured.")
+                return
+
+        lines = []
+        if len(controllers) == 1:
+            station_name = controllers[0].RADIO_CONF.get("NAME", "UNKNOWN")
+            lines.append(f"Codewords for {station_name}:")
+        else:
+            lines.append(f"Recent codewords (last {num_lines} per station):")
+
+        for ctrl in controllers:
+            station_name = ctrl.RADIO_CONF.get("NAME", "UNKNOWN")
+            processor = ctrl.processor
+            entry_prefix = "  " if len(controllers) > 1 else ""
+            if len(controllers) > 1:
+                lines.append(f"{station_name}:")
+            if processor is None:
+                lines.append(f"{entry_prefix}(processor not initialized)")
+                continue
+            processor._clear_codewords_if_stale()
+            with processor.lock:
+                entries = list(processor.previous_codewords)
+            if num_lines is not None:
+                entries = entries[-num_lines:]
+            if not entries:
+                lines.append(f"{entry_prefix}(none)")
+            else:
+                for word, ts in entries:
+                    ts_str = ts.strftime("%Y-%m-%d %H:%M:%S") if ts else "unknown time"
+                    lines.append(f"{entry_prefix}{ts_str} - {word}")
+            if len(controllers) > 1:
+                lines.append("")
+
+        payload = "\n".join(lines).strip()
+        if not payload:
+            payload = "No codewords found."
+        await self._reply_text_or_document(update, payload, "codewords.txt", caption="Codewords")
 
     async def search_command(self, update, context):
         """Search logs for a keyword or phrase.
@@ -480,12 +624,32 @@ class TelegramBot():
     def send_message(self, text):
         if self.app is None:
             return
-        asyncio.run_coroutine_threadsafe(self.app.bot.send_message(chat_id=self.radioListener.CONFIG["TELEGRAM_CHAT_ID"], text=text), self.loop)
+        chat_id = self.radioListener.CONFIG.get("TELEGRAM_CHAT_ID")
+        if not chat_id:
+            logger.log_event("TELEGRAM", "send_message skipped: TELEGRAM_CHAT_ID not set")
+            return
+        self._schedule(self._send_message(chat_id, text), f"send_message chat_id={chat_id}")
+
+    def send_debug_message(self, text):
+        if text:
+            self.debug_history.append(text)
+        if self.app is None:
+            return
+        if not self.radioListener.CONFIG.get("TELEGRAM_DEBUG_PRIVATE", False):
+            return
+        chat_id = self.radioListener.CONFIG.get("TELEGRAM_CHAT_ID_PRIVATE")
+        if not chat_id:
+            return
+        self._schedule(self._send_message(chat_id, text), f"send_debug_message chat_id={chat_id}")
 
     def send_audio(self, audio_path, caption=""):
         if self.app is None:
             return
-        asyncio.run_coroutine_threadsafe(self.app.bot.send_audio(chat_id=self.radioListener.CONFIG["TELEGRAM_CHAT_ID"], audio=open(audio_path, 'rb'), caption=caption), self.loop)
+        chat_id = self.radioListener.CONFIG.get("TELEGRAM_CHAT_ID")
+        if not chat_id:
+            logger.log_event("TELEGRAM", "send_audio skipped: TELEGRAM_CHAT_ID not set")
+            return
+        self._schedule(self._send_audio(chat_id, audio_path, caption=caption), f"send_audio {audio_path}")
     
     def send_sms_message(self, phone_number, text = ""):
         if not text:
@@ -496,7 +660,14 @@ class TelegramBot():
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         #msg=f"sms:{phone_number}?body={text}"
-        asyncio.run_coroutine_threadsafe(self.app.bot.send_message(chat_id=self.radioListener.CONFIG["TELEGRAM_CHAT_ID"], text="Send SMS?", reply_markup=reply_markup), self.loop)
+        chat_id = self.radioListener.CONFIG.get("TELEGRAM_CHAT_ID")
+        if not chat_id:
+            logger.log_event("TELEGRAM", "send_sms_message skipped: TELEGRAM_CHAT_ID not set")
+            return
+        self._schedule(
+            self._send_message(chat_id, "Send SMS?", reply_markup=reply_markup),
+            f"send_sms_message chat_id={chat_id}",
+        )
 
     @staticmethod
     async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

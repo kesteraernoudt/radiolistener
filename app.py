@@ -15,6 +15,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 
+def _env_truthy(value):
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 class RadioListener:
     def __init__(self, config_path):
         super().__init__()
@@ -42,6 +46,12 @@ class RadioListener:
         load_dotenv()  # Load environment variables from .env file
         self.CONFIG["TELEGRAM_BOT_TOKEN"] = os.getenv("TELEGRAM_BOT_TOKEN")
         self.CONFIG["TELEGRAM_CHAT_ID"] = os.getenv("TELEGRAM_CHAT_ID")
+        self.CONFIG["TELEGRAM_CHAT_ID_PRIVATE"] = os.getenv("TELEGRAM_CHAT_ID_PRIVATE")
+        env_debug = os.getenv("TELEGRAM_DEBUG_PRIVATE")
+        if env_debug is None:
+            self.CONFIG["TELEGRAM_DEBUG_PRIVATE"] = bool(self.CONFIG.get("TELEGRAM_DEBUG_PRIVATE", False))
+        else:
+            self.CONFIG["TELEGRAM_DEBUG_PRIVATE"] = _env_truthy(env_debug)
         self.CONFIG["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
         self.CONFIG["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY") or ""
         self.CONFIG["MISTRAL_API_KEY"] = os.getenv("MISTRAL_API_KEY") or ""

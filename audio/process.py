@@ -197,27 +197,32 @@ class StreamProcessor:
         elif "URL" in self.radio_conf:
             alert_msg += f": submit at {self.radio_conf['URL']}"
         timeline_summary = self._format_timeline_summary(timeline or {})
+        log_msg = alert_msg
         if timeline_summary:
-            alert_msg += f"\n⏱️ {timeline_summary}"
+            log_msg += f"\n⏱️ {timeline_summary}"
         if self.log_enabled:
-            logger.log_event(self.radio_conf["NAME"], alert_msg)
-        print(self.radio_conf["NAME"] + ": " + alert_msg)
+            logger.log_event(self.radio_conf["NAME"], log_msg)
+        print(self.radio_conf["NAME"] + ": " + log_msg)
         if now - self.last_alert_time > 300:  # MIN_ALERT_INTERVAL
-            # telegram_notifier.send_telegram(alert_msg)
             ctrl = getattr(self, 'controller', None)
             if ctrl is not None and hasattr(ctrl, 'send_message'):
-                if timeline is not None:
-                    timeline["telegram_sent_at"] = time.time()
-                ctrl.send_message(
-                    self.radio_conf["NAME"]
-                    + ": "
-                    + alert_msg
-                    + (f", context: {context}" if context else "")
-                )
+                main_msg = f"{self.radio_conf['NAME']}: {alert_msg}"
+                if context:
+                    main_msg += f"\nContext: {context}"
+                ctrl.send_message(main_msg)
+            debug_info = {
+                "match": matches,
+                "codeword": code_word,
+                "confidence": getattr(self.genAIHandler, "last_confidence", 0.0),
+                "evidence": getattr(self.genAIHandler, "last_evidence", None),
+                "context": context,
+            }
             # self.controller.send_sms_message(code_word)
             self.last_alert_time = now
             # Request a clip tied to this transcript timeline
-            self.request_clip(timeline or {"captured_at": now})
+            request_timeline = dict(timeline or {"captured_at": now})
+            request_timeline["debug_info"] = debug_info
+            self.request_clip(request_timeline)
 
     def _codeword_texts(self):
         return [code_word for code_word, _ in self.previous_codewords]
@@ -376,6 +381,35 @@ class StreamProcessor:
             total_ms = (timeline["processing_completed_at"] - captured_at) * 1000
             pieces.append(f"total {total_ms:.0f}ms")
         return "; ".join(pieces)
+
+    def _format_debug_message(self, debug_info: dict, timeline_summary: str) -> str:
+        radio_name = self.radio_conf.get("NAME", "UNKNOWN")
+        match = debug_info.get("match")
+        codeword = debug_info.get("codeword")
+        confidence = debug_info.get("confidence")
+        evidence = debug_info.get("evidence")
+        context = debug_info.get("context")
+
+        lines = [f"{radio_name} debug"]
+        if match or codeword:
+            lines.append(f"Match: {match} -> {codeword}")
+        if confidence is not None:
+            try:
+                conf_val = float(confidence)
+                lines.append(f"Confidence: {conf_val:.2f}")
+            except (TypeError, ValueError):
+                lines.append(f"Confidence: {confidence}")
+        else:
+            lines.append("Confidence: n/a")
+        if evidence:
+            lines.append(f"Evidence: {evidence}")
+        else:
+            lines.append("Evidence: <none>")
+        if context:
+            lines.append(f"Context: {context}")
+        if timeline_summary:
+            lines.append(f"⏱️ {timeline_summary}")
+        return "\n".join(lines)
 
     def handle_match(self, match, text, timeline=None):
         prev_context = (
@@ -639,19 +673,22 @@ class StreamProcessor:
             merged_timeline = dict(timeline or {})
             # give request-specific fields priority when present
             merged_timeline.update({k: v for k, v in req_timeline.items() if v is not None})
+            debug_info = merged_timeline.pop("debug_info", None)
             audio_bytes, capture_ts = self._extract_clip_bytes(merged_timeline)
             if not audio_bytes:
                 continue
             clip_path = clip_saver.save_clip(audio_bytes, capture_ts=capture_ts)
             merged_timeline["clip_saved_at"] = time.time()
-            summary = self._format_timeline_summary(merged_timeline)
 
             if ctrl is not None and hasattr(ctrl, "send_audio"):
-                caption = (
-                    f"{self.radio_conf.get('NAME','UNKNOWN')} clip"
-                    + (f"\n⏱️ {summary}" if summary else "")
-                )
+                merged_timeline.setdefault("telegram_sent_at", time.time())
+                caption = f"{self.radio_conf.get('NAME','UNKNOWN')} clip"
                 ctrl.send_audio(clip_path, caption=caption)
+
+            summary = self._format_timeline_summary(merged_timeline)
+            if debug_info and ctrl is not None and hasattr(ctrl, "send_debug_message"):
+                debug_message = self._format_debug_message(debug_info, summary)
+                ctrl.send_debug_message(debug_message)
 
     def _run_asr(self, audio_np: np.ndarray) -> str:
         if self.asr_backend == "faster-whisper" and self.faster_whisper_model:
